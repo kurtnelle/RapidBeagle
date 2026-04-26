@@ -252,6 +252,62 @@ run_diagnostics() {
     log_ok "Phase 1 complete. Diagnostics in: $DIAG_DIR"
 }
 
+# ── Phase 2: Service Disabling ────────────────────────────────────────────────
+# Disables services from KILL_LIST that both exist AND are currently enabled.
+# Records each disabled service in MANIFEST_FILE for restore.
+# Protected services (ssh, networking, getty, usb-gadget) are not in KILL_LIST.
+
+disable_services() {
+    log "--- Phase 2: Service Disabling ---"
+
+    # Ensure manifest directory exists
+    mkdir -p "$LOG_DIR"
+
+    # Initialise manifest section (idempotent: append only new entries)
+    if [[ ! -f "$MANIFEST_FILE" ]]; then
+        cat > "$MANIFEST_FILE" <<'MANIFEST'
+# RapidBeagle applied-manifest
+# Format: TYPE|VALUE
+# This file is read by restore-pocketbeagle-boot.sh
+MANIFEST
+    fi
+
+    local disabled_count=0
+
+    for svc in "${KILL_LIST[@]}"; do
+        # Check the .service unit exists on this image
+        if ! systemctl list-unit-files "${svc}.service" 2>/dev/null | grep -q "${svc}.service"; then
+            log_skip "Service not present: ${svc}.service"
+            continue
+        fi
+
+        # Check it is currently enabled (don't record already-disabled services)
+        local state
+        state="$(systemctl is-enabled "${svc}.service" 2>/dev/null || echo "not-found")"
+        if [[ "$state" != "enabled" && "$state" != "static" ]]; then
+            log_skip "Already not enabled (${state}): ${svc}.service"
+            continue
+        fi
+
+        log_action "Disable and stop: ${svc}.service (was: ${state})"
+
+        if [[ "$DRY_RUN" -eq 0 ]]; then
+            systemctl disable --now "${svc}.service" 2>&1 | while IFS= read -r line; do
+                log "    systemctl: $line"
+            done || log_warn "  disable returned non-zero for ${svc} (may already be stopped)"
+
+            # Record in manifest so restore knows exactly what to re-enable
+            if ! grep -qF "SERVICE|${svc}" "$MANIFEST_FILE" 2>/dev/null; then
+                echo "SERVICE|${svc}" >> "$MANIFEST_FILE"
+            fi
+        fi
+
+        (( disabled_count++ )) || true
+    done
+
+    log_ok "Phase 2 complete. Services acted on: ${disabled_count}"
+}
+
 # ── Main (stub — filled in Task 12) ──────────────────────────────────────────
 
 main() {
@@ -275,6 +331,13 @@ main() {
     if [[ "$DRY_RUN" -eq 0 ]]; then
         log "Proceeding with --apply phases..."
     else
+        # In dry-run, still walk through all phases for preview output
+        DRY_RUN=1
+    fi
+
+    disable_services
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY-RUN complete. No configuration changes were made."
         log "Diagnostic files written to: ${DIAG_DIR:-$DIAG_DIR_FALLBACK}"
         exit 0
