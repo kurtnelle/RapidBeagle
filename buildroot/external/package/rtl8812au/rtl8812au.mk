@@ -1,75 +1,41 @@
 ################################################################################
 #
-# rtl8812au — out-of-tree driver for Realtek RTL8811AU / 8812AU / 8821AU
-# USB WiFi chipsets (e.g., Edimax EW-7811UTC AC600).
+# rtl8812au — Realtek RTL8811AU / 8821AU USB WiFi driver
 #
-# Mainline Linux 6.6 has rtw88 (PCI-E AC chips) and rtl8xxxu (older 8188CU/
-# 8192CU N chips) but neither covers the USB-AC family. The aircrack-ng
-# fork is the most complete chipset-coverage option.
+# Driver journey:
+#   - aircrack-ng/rtl8812au v5.13.6: full chipset coverage but doesn't compile
+#     against Linux 6.6 (cfg80211 + REGULATORY_IGNORE_STALE_KICKOFF API
+#     changes). Even with our patches it produced wlan0 but the chip MCU
+#     races _FWFreeToGo8812: WINTINI_RDY never flips → FW download "succeeds"
+#     (checksum OK) but the chip never goes live. Confirmed dead-end on
+#     mainline 6.4+ + AM335x MUSB host.
 #
-# Module name: 88XXau.ko
+#   - morrownr/8812au-20210820: stripped RTL8821A source — won't work for
+#     our Edimax AC600 (RTL8811AU chipset → handled via 8821A codepath).
 #
-# We use the aircrack-ng fork because it's the only one that ships
-# RTL8821A source files needed for the RTL8811AU chipset (which the
-# Edimax AC600 uses). morrownr's fork is 8812AU-only — RTL8821A code
-# was stripped. v5.13.6 is the latest tagged release; it doesn't
-# compile clean against Linux 6.6 (cfg80211 API changes), so we patch
-# those two call sites via POST_EXTRACT hook.
+#   - morrownr/8821au-20210708 (CURRENT): dedicated 8811AU/8821AU repo,
+#     active 2024+, distinct HAL init refactor → real chance of fixing
+#     the post-FW-download MCU readiness timeout.
+#
+# Module name produced: 8821au.ko
+# Load with: modprobe 8821au
 #
 ################################################################################
 
-# Stable tag from https://github.com/aircrack-ng/rtl8812au/tags
-RTL8812AU_VERSION = v5.13.6
-RTL8812AU_SITE = $(call github,aircrack-ng,rtl8812au,$(RTL8812AU_VERSION))
+# morrownr/8821au-20210708 has no tags — pin to the current main HEAD.
+# Bump as needed when newer kernels break things again.
+RTL8812AU_VERSION = 0afd9bac2c6a53a4717df804631b5b2268c0bd24
+RTL8812AU_SITE = $(call github,morrownr,8821au-20210708,$(RTL8812AU_VERSION))
 RTL8812AU_LICENSE = GPL-2.0
 RTL8812AU_LICENSE_FILES = LICENSE
 
+# Same Makefile gating as morrownr/8812au — the Makefile checks
+# CONFIG_RTL8812AU at obj-m time. Without it, no .c files compile.
+# CONFIG_PLATFORM_I386_PC is the "generic Linux" path; Buildroot supplies
+# the actual cross-compiler so leaving it at default is correct.
 RTL8812AU_MODULE_MAKE_OPTS = \
 	CONFIG_RTL8812AU=m \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
-# Note on CONFIG_PLATFORM_*:
-#   The Makefile's CONFIG_PLATFORM_I386_PC is misleadingly named — it's the
-#   "generic Linux" path; doesn't hardcode an x86 toolchain. Buildroot
-#   already supplies ARCH/CROSS_COMPILE via -C $(LINUX_DIR), so we leave
-#   the default I386_PC=y. Setting alternative platform names breaks the
-#   build because they hardcode different toolchains.
-#
-# Note on chipset CONFIGs:
-#   The Makefile defaults CONFIG_RTL8812A=y, CONFIG_RTL8821A=y in this
-#   fork — both required for the Edimax AC600 (RTL8811AU → RTL8821A
-#   codepath). Don't override these; the morrownr fork stripped the 8821A
-#   source files, but aircrack-ng has them.
-
-# ── Patch 1: Linux 6.5+ added `punct_bitmap` to cfg80211_ch_switch_notify
-# and cfg80211_ch_switch_started_notify (for 802.11be/WiFi 7). v5.13.6's
-# call sites don't pass it. Inject a `, 0` literal at the end of each
-# call. Two specific call sites in os_dep/linux/ioctl_cfg80211.c.
-define RTL8812AU_FIX_CFG80211_PUNCT_BITMAP
-	$(SED) 's|cfg80211_ch_switch_started_notify(adapter->pnetdev, &chdef, 0, 0, false);|cfg80211_ch_switch_started_notify(adapter->pnetdev, \&chdef, 0, 0, false, 0);|' \
-		$(@D)/os_dep/linux/ioctl_cfg80211.c
-	$(SED) 's|cfg80211_ch_switch_notify(adapter->pnetdev, &chdef, 0);|cfg80211_ch_switch_notify(adapter->pnetdev, \&chdef, 0, 0);|' \
-		$(@D)/os_dep/linux/ioctl_cfg80211.c
-endef
-RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_CFG80211_PUNCT_BITMAP
-
-# ── Patch 1b: REGULATORY_IGNORE_STALE_KICKOFF doesn't exist in mainline
-# kernels — appears to have been a downstream-only flag the driver
-# expected. Replace with literal 0 so the OR-assign is a no-op.
-define RTL8812AU_FIX_REGULATORY_IGNORE_STALE_KICKOFF
-	$(SED) 's/REGULATORY_IGNORE_STALE_KICKOFF/0/g' \
-		$(@D)/os_dep/linux/wifi_regd.c
-endef
-RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_REGULATORY_IGNORE_STALE_KICKOFF
-
-# ── Patch 2: Add Edimax EW-7811UTC AC600 (USB ID 7392:a812) to the device
-# table. aircrack-ng v5.13.6 covers other Edimax variants (0xA811, 0xA822,
-# 0xA834) but misses 0xA812 specifically. Same RTL8811AU chipset → handled
-# as RTL8821 family by this driver.
-define RTL8812AU_ADD_EDIMAX_AC600_ID
-	grep -q '0x7392, 0xA812' $(@D)/os_dep/linux/usb_intf.c || \
-		$(SED) '/0x7392, 0xA811.*Edimax/a\	{USB_DEVICE(0x7392, 0xA812), .driver_info = RTL8821}, /* Edimax EW-7811UTC AC600 */' $(@D)/os_dep/linux/usb_intf.c
-endef
-RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_ADD_EDIMAX_AC600_ID
 
 $(eval $(kernel-module))
 $(eval $(generic-package))
