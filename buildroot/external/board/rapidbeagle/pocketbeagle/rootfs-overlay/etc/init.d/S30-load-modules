@@ -1,0 +1,36 @@
+#!/bin/sh
+# S30-load-modules — load out-of-tree kernel modules at boot
+#
+# Most of our kernel is built-in (=y). The exceptions are out-of-tree drivers
+# that have to be modules because they're built outside the kernel tree.
+#
+# Currently:
+#   88XXau — Realtek RTL8811AU/8812AU/8821AU/8814AU USB WiFi (Edimax AC600 etc.)
+#
+# Loads matter for hardware that's already on the bus at boot — modprobe
+# triggers the driver's probe(), which scans existing devices and creates
+# wlan0 (or similar). Without auto-load and without udev, this is the
+# manual hook.
+
+case "$1" in
+    start)
+        for mod in 88XXau; do
+            if [ -d "/sys/module/$mod" ]; then
+                echo "S30-load-modules: $mod already loaded"
+                continue
+            fi
+            if modprobe "$mod" 2>/dev/null; then
+                echo "S30-load-modules: loaded $mod"
+            else
+                echo "S30-load-modules: $mod not available (skipping)"
+            fi
+        done
+        ;;
+    stop)
+        for mod in 88XXau; do
+            [ -d "/sys/module/$mod" ] && rmmod "$mod" 2>/dev/null
+        done
+        ;;
+esac
+
+exit 0

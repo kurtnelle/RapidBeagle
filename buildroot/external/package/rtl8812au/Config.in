@@ -1,0 +1,15 @@
+config BR2_PACKAGE_RTL8812AU
+	bool "rtl8812au (out-of-tree)"
+	depends on BR2_LINUX_KERNEL
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	help
+	  Out-of-tree driver for Realtek RTL8811AU / RTL8812AU /
+	  RTL8814AU / RTL8821AU USB WiFi chipsets — covers most "AC"
+	  USB dongles (Edimax AC600, Alfa AWUS036ACH, etc.) that
+	  mainline Linux does NOT support.
+
+	  Sourced from https://github.com/aircrack-ng/rtl8812au — the
+	  most actively maintained fork.
+
+	  Module name produced: 88XXau.ko
+	  Load with: modprobe 88XXau

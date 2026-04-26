@@ -1,3 +1,8 @@
 # RapidBeagle external tree Kconfig hooks.
-# No custom packages in v1 — this file is intentionally empty other than this comment.
-# Future custom packages will add: source "$BR2_EXTERNAL_RAPIDBEAGLE_PATH/package/<name>/Config.in"
+# Each custom package gets a `source` line below.
+
+menu "RapidBeagle custom packages"
+
+source "$BR2_EXTERNAL_RAPIDBEAGLE_PATH/package/rtl8812au/Config.in"
+
+endmenu

@@ -45,9 +45,12 @@ BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_INIT_BUSYBOX=y
 
 # ── Filesystem ───────────────────────────────────────────────────────────────
+# Sized for the .NET 10 ASP.NET Core runtime (~210 MB) + headroom for the
+# user's app + logs + future overlay-fs upper-dir spill. 512 MB on a 1 GB+
+# SD is comfortable.
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
-BR2_TARGET_ROOTFS_EXT2_SIZE="240M"
+BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
 BR2_TARGET_ROOTFS_TAR=y
 
 # ── /dev management: devtmpfs (mounted by kernel, BusyBox manages it) ───────
@@ -106,3 +109,26 @@ BR2_PACKAGE_IFUPDOWN_SCRIPTS=y
 
 # Network basics
 BR2_PACKAGE_NETBASE=y
+
+# ── .NET 10 ASP.NET Core runtime dependencies ────────────────────────────────
+# The Microsoft binary runtime tarball is dropped into /opt/dotnet by
+# post-build.sh — these are the shared libraries it links against.
+BR2_PACKAGE_OPENSSL=y
+BR2_PACKAGE_OPENSSL_BIN=y
+BR2_PACKAGE_LIBOPENSSL=y
+BR2_PACKAGE_LIBCURL=y
+BR2_PACKAGE_LIBCURL_OPENSSL=y
+BR2_PACKAGE_LIBICU=y
+BR2_PACKAGE_LIBUNWIND=y
+BR2_PACKAGE_KRB5=y
+# zlib + lz4 for various dotnet compression paths
+BR2_PACKAGE_ZLIB=y
+BR2_PACKAGE_LZ4=y
+
+# ── Wireless regulatory database (silences boot warning + lets WiFi work) ───
+BR2_PACKAGE_WIRELESS_REGDB=y
+
+# ── Out-of-tree Realtek RTL8811AU/8812AU/8821AU driver ──────────────────────
+# Required for the Edimax AC600 USB WiFi dongle (chipset RTL8811AU); mainline
+# Linux 6.6 has no driver for this USB-AC family.
+BR2_PACKAGE_RTL8812AU=y
