@@ -1,0 +1,7 @@
+# Force LF line endings for shell scripts — prevents CRLF breaking shebangs on Linux
+*.sh    text eol=lf
+
+# Force LF for all text files deployed to Linux targets
+*.service   text eol=lf
+*.conf      text eol=lf
+*.md        text eol=lf
