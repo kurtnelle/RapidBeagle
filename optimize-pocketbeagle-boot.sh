@@ -534,6 +534,143 @@ NMCONF
     log_ok "Phase 5 complete."
 }
 
+# ── Phase 6: USR0 LED Heartbeat Service ──────────────────────────────────────
+# Installs pb-heartbeat.service and its companion script.
+#
+# LED: beaglebone:green:usr0 (reclaimed from kernel "heartbeat" trigger)
+#
+# Blink behavior:
+#   FAST (5 Hz, 100ms on/off) — during boot (until /run/boot-complete exists)
+#   SLOW (0.5 Hz, 1s on/off) — after multi-user.target, app not running
+#   STEADY ON               — after dotnet-app.service becomes active
+#
+# The /run/boot-complete flag is written by pb-boot-marker.service (Phase 7).
+# Disable with: systemctl disable pb-heartbeat
+
+install_heartbeat_service() {
+    log "--- Phase 6: USR0 LED Heartbeat Service ---"
+
+    # Verify LED path exists on this device
+    if [[ ! -d "$LED_PATH" ]]; then
+        log_warn "LED path not found: $LED_PATH"
+        log_warn "Skipping heartbeat service install (not a BeagleBone/PocketBeagle?)"
+        return
+    fi
+
+    # Idempotency: skip if already installed and enabled
+    if systemctl is-enabled pb-heartbeat.service &>/dev/null; then
+        log_skip "pb-heartbeat.service already enabled — skipping"
+        return
+    fi
+
+    log_action "Install heartbeat script: $HEARTBEAT_SCRIPT"
+    log_action "Install heartbeat service: $HEARTBEAT_SERVICE"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+
+        # Write the heartbeat control script
+        cat > "$HEARTBEAT_SCRIPT" <<'HBSCRIPT'
+#!/usr/bin/env bash
+# pb-heartbeat — USR0 LED boot heartbeat
+# Called by pb-heartbeat.service
+# Do not edit manually — managed by optimize-pocketbeagle-boot.sh
+
+set -euo pipefail
+
+LED="/sys/class/leds/beaglebone:green:usr0"
+BOOT_COMPLETE_FLAG="/run/boot-complete"
+DOTNET_SERVICE="dotnet-app.service"
+
+# Reclaim USR0 from the kernel "heartbeat" trigger
+echo none > "${LED}/trigger"
+echo 0    > "${LED}/brightness"
+
+cleanup() {
+    # On exit/stop: restore kernel heartbeat trigger so LED still works
+    # if the service is stopped manually
+    echo heartbeat > "${LED}/trigger" 2>/dev/null || true
+}
+trap cleanup EXIT TERM INT
+
+led_on()  { echo 1 > "${LED}/brightness"; }
+led_off() { echo 0 > "${LED}/brightness"; }
+
+blink_fast() {
+    # 5 Hz: 100ms on, 100ms off
+    led_on;  sleep 0.1
+    led_off; sleep 0.1
+}
+
+blink_slow() {
+    # 0.5 Hz: 1s on, 1s off
+    led_on;  sleep 1
+    led_off; sleep 1
+}
+
+# Main loop: transitions through boot states
+while true; do
+    if systemctl is-active --quiet "$DOTNET_SERVICE" 2>/dev/null; then
+        # App running: steady on
+        led_on
+        sleep 2
+    elif [[ -f "$BOOT_COMPLETE_FLAG" ]]; then
+        # Boot complete, app not running: slow blink
+        blink_slow
+    else
+        # Still booting: fast blink
+        blink_fast
+    fi
+done
+HBSCRIPT
+
+        chmod +x "$HEARTBEAT_SCRIPT"
+        log_ok "Heartbeat script written: $HEARTBEAT_SCRIPT"
+
+        # Write the systemd service unit
+        cat > "$HEARTBEAT_SERVICE" <<'HBSERVICE'
+# /etc/systemd/system/pb-heartbeat.service
+# USR0 LED boot heartbeat — installed by optimize-pocketbeagle-boot.sh
+# To disable: systemctl disable pb-heartbeat
+# To remove:  run restore-pocketbeagle-boot.sh
+
+[Unit]
+Description=PocketBeagle USR0 LED Boot Heartbeat
+# Start as early as possible — before basic.target so LED is visible from power-on
+DefaultDependencies=no
+After=sysinit.target
+Before=basic.target
+# Do not fail boot if this service fails
+IgnoreOnIsolate=yes
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/pb-heartbeat
+# Restart on failure so LED keeps blinking even if the script crashes
+Restart=on-failure
+RestartSec=1
+# Run as root — needed to write to sysfs LED paths
+User=root
+
+[Install]
+WantedBy=sysinit.target
+HBSERVICE
+
+        # Enable and start the service
+        systemctl daemon-reload
+        systemctl enable pb-heartbeat.service
+        systemctl start  pb-heartbeat.service || log_warn "pb-heartbeat start failed (non-fatal; will run on next boot)"
+
+        # Record in manifest for restore
+        if ! grep -qF "SERVICE_INSTALLED|pb-heartbeat" "$MANIFEST_FILE" 2>/dev/null; then
+            echo "SERVICE_INSTALLED|pb-heartbeat" >> "$MANIFEST_FILE"
+        fi
+
+        log_ok "pb-heartbeat.service installed and enabled"
+    fi
+
+    log_ok "Phase 6 complete."
+}
+
 # ── Main (stub — filled in Task 12) ──────────────────────────────────────────
 
 main() {
@@ -565,6 +702,7 @@ main() {
     write_module_blacklist
     patch_kernel_cmdline
     write_nm_no_auto
+    install_heartbeat_service
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY-RUN complete. No configuration changes were made."
