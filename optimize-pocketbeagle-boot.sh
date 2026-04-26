@@ -1051,9 +1051,11 @@ RESTORESCRIPT
 
 main() {
     parse_args "$@"
+    check_guards
+
     setup_logging
 
-    # Handle --restore before guard checks — the restore script has its own root check
+    # Handle --restore after logging is set up
     if [[ "$MODE" == "--restore" ]]; then
         if [[ ! -f "$RESTORE_SCRIPT" ]]; then
             echo "ERROR: Restore script not found: $RESTORE_SCRIPT" >&2
@@ -1063,8 +1065,6 @@ main() {
         log "Delegating to restore script: $RESTORE_SCRIPT"
         exec bash "$RESTORE_SCRIPT"
     fi
-
-    check_guards
 
     log ""
     if [[ "$DRY_RUN" -eq 1 ]]; then
