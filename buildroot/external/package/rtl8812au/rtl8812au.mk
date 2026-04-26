@@ -29,12 +29,14 @@ RTL8812AU_SITE = $(call github,morrownr,8821au-20210708,$(RTL8812AU_VERSION))
 RTL8812AU_LICENSE = GPL-2.0
 RTL8812AU_LICENSE_FILES = LICENSE
 
-# Same Makefile gating as morrownr/8812au — the Makefile checks
-# CONFIG_RTL8812AU at obj-m time. Without it, no .c files compile.
+# Same Makefile-gating pattern as morrownr/8812au but the obj-m trigger is
+# CONFIG_RTL8821AU=m (note: 8821AU, not 8812AU — this is a different repo
+# focused on the 8811AU/8821AU chipsets). Without it, no .c files compile;
+# only MODPOST runs and no .ko is produced.
 # CONFIG_PLATFORM_I386_PC is the "generic Linux" path; Buildroot supplies
 # the actual cross-compiler so leaving it at default is correct.
 RTL8812AU_MODULE_MAKE_OPTS = \
-	CONFIG_RTL8812AU=m \
+	CONFIG_RTL8821AU=m \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
 
 $(eval $(kernel-module))
