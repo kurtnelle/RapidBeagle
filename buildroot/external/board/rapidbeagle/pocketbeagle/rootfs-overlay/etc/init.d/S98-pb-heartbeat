@@ -1,0 +1,79 @@
+#!/bin/sh
+# S98-pb-heartbeat — USR0 LED boot heartbeat
+#
+# Three states:
+#   No /run/boot-complete                    → fast blink (5 Hz)
+#   /run/boot-complete, no live /run/app.pid → slow blink (0.5 Hz)
+#   /run/app.pid points at a live process    → steady on
+#
+# Forks into the background as a child of init. Stop with `S98-pb-heartbeat stop`.
+
+DAEMON=pb-heartbeat
+PIDFILE=/run/$DAEMON.pid
+LED=/sys/class/leds/beaglebone:green:usr0
+BOOT_FLAG=/run/boot-complete
+APP_PID_FILE=/run/app.pid
+
+start() {
+    if [ ! -d "$LED" ]; then
+        echo "S98-pb-heartbeat: LED path $LED not found — exiting"
+        return 0
+    fi
+
+    # Reclaim USR0 from the kernel "heartbeat" trigger
+    echo none > "$LED/trigger" 2>/dev/null || true
+    echo 0    > "$LED/brightness" 2>/dev/null || true
+
+    # Background loop
+    (
+        while true; do
+            if [ -f "$APP_PID_FILE" ]; then
+                APID=$(cat "$APP_PID_FILE" 2>/dev/null)
+                if [ -n "$APID" ] && [ -d "/proc/$APID" ]; then
+                    # App alive — steady on
+                    echo 1 > "$LED/brightness" 2>/dev/null || true
+                    sleep 2
+                    continue
+                fi
+            fi
+            if [ -f "$BOOT_FLAG" ]; then
+                # Slow blink: 1s on, 1s off
+                echo 1 > "$LED/brightness" 2>/dev/null || true
+                sleep 1
+                echo 0 > "$LED/brightness" 2>/dev/null || true
+                sleep 1
+            else
+                # Fast blink: 100ms on, 100ms off
+                echo 1 > "$LED/brightness" 2>/dev/null || true
+                sleep 0.1
+                echo 0 > "$LED/brightness" 2>/dev/null || true
+                sleep 0.1
+            fi
+        done
+    ) &
+
+    echo $! > "$PIDFILE"
+    echo "S98-pb-heartbeat: started (pid $(cat "$PIDFILE"))"
+}
+
+stop() {
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat "$PIDFILE")" 2>/dev/null || true
+        rm -f "$PIDFILE"
+    fi
+    # Restore kernel heartbeat trigger so the LED still works without us
+    echo heartbeat > "$LED/trigger" 2>/dev/null || true
+    echo "S98-pb-heartbeat: stopped"
+}
+
+case "$1" in
+    start) start ;;
+    stop)  stop ;;
+    restart) stop; start ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
