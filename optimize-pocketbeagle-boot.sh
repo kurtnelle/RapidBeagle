@@ -671,6 +671,73 @@ HBSERVICE
     log_ok "Phase 6 complete."
 }
 
+# ── Phase 7: Boot Complete Marker ────────────────────────────────────────────
+# Installs pb-boot-marker.service, which runs once after multi-user.target
+# and writes a human-readable status file.
+#
+# Output file (readable from host via SCP without interactive SSH):
+#   /boot/firmware/BOOT_COMPLETE.txt  (if /boot/firmware/ exists)
+#   /root/BOOT_COMPLETE.txt           (fallback)
+#
+# Also touches /run/boot-complete (flag read by pb-heartbeat to transition
+# from fast blink to slow blink).
+
+install_boot_marker_service() {
+    log "--- Phase 7: Boot Complete Marker Service ---"
+
+    # Idempotency: skip if already installed
+    if systemctl is-enabled pb-boot-marker.service &>/dev/null; then
+        log_skip "pb-boot-marker.service already enabled — skipping"
+        return
+    fi
+
+    log_action "Install boot marker service: $MARKER_SERVICE"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+
+        cat > "$MARKER_SERVICE" <<'MARKERSERVICE'
+# /etc/systemd/system/pb-boot-marker.service
+# Boot complete marker — installed by optimize-pocketbeagle-boot.sh
+# To remove: run restore-pocketbeagle-boot.sh
+
+[Unit]
+Description=PocketBeagle Boot Complete Marker
+# Run after the full multi-user stack is up and network has had a chance to settle
+After=multi-user.target network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '\
+    MARKER_FILE=$([[ -d /boot/firmware ]] && echo /boot/firmware/BOOT_COMPLETE.txt || echo /root/BOOT_COMPLETE.txt); \
+    HOSTNAME=$(hostname); \
+    UPTIME=$(awk "{printf \"%.1fs\", \$1}" /proc/uptime); \
+    IP_LINES=$(ip -o addr show scope global | awk "{printf \"  %s=%s\\n\", \$2, \$4}"); \
+    CMDLINE=$(cat /proc/cmdline); \
+    printf "Boot completed: %s\nHostname: %s\nUptime: %s\nIP addresses:\n%s\nKernel cmdline: %s\n" \
+        "$(date)" "$HOSTNAME" "$UPTIME" "$IP_LINES" "$CMDLINE" > "$MARKER_FILE"; \
+    touch /run/boot-complete; \
+    echo "Boot marker written to $MARKER_FILE"'
+
+[Install]
+WantedBy=multi-user.target
+MARKERSERVICE
+
+        systemctl daemon-reload
+        systemctl enable pb-boot-marker.service
+
+        # Record in manifest for restore
+        if ! grep -qF "SERVICE_INSTALLED|pb-boot-marker" "$MANIFEST_FILE" 2>/dev/null; then
+            echo "SERVICE_INSTALLED|pb-boot-marker" >> "$MANIFEST_FILE"
+        fi
+
+        log_ok "pb-boot-marker.service installed and enabled"
+    fi
+
+    log_ok "Phase 7 complete."
+}
+
 # ── Main (stub — filled in Task 12) ──────────────────────────────────────────
 
 main() {
@@ -703,6 +770,7 @@ main() {
     patch_kernel_cmdline
     write_nm_no_auto
     install_heartbeat_service
+    install_boot_marker_service
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY-RUN complete. No configuration changes were made."
