@@ -30,7 +30,15 @@ RTL8812AU_LICENSE_FILES = LICENSE
 #
 # This works equally well for ARMv7 (PocketBeagle 1) and aarch64
 # (PocketBeagle 2) — Buildroot's kernel-module build handles arch.
+#
+# CONFIG_RTL8812AU=m is the actual obj-m switch the Makefile checks at
+# kernel-build time:
+#     obj-$(CONFIG_RTL8812AU) := $(MODULE_NAME).o
+# Without this, obj-m is empty, no .c files compile, only MODPOST runs,
+# and no .ko file is produced. Standard `make` for this driver always
+# passes CONFIG_RTL8812AU=m on the command line.
 RTL8812AU_MODULE_MAKE_OPTS = \
+	CONFIG_RTL8812AU=m \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
 
 $(eval $(kernel-module))
