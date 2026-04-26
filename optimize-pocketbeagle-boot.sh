@@ -185,6 +185,73 @@ setup_logging() {
     log "============================================================"
 }
 
+# ── Phase 1: Diagnostic Snapshot ─────────────────────────────────────────────
+# Runs in ALL modes (dry-run and apply). Writes read-only system observations.
+# Saved to /boot/firmware/boot-diagnostics/ if available, else /root/boot-diagnostics/
+
+run_diagnostics() {
+    log "--- Phase 1: Diagnostic Snapshot ---"
+
+    # Choose diagnostic output directory
+    if [[ -d "/boot/firmware" ]]; then
+        DIAG_DIR="$DIAG_DIR_PRIMARY"
+    else
+        DIAG_DIR="$DIAG_DIR_FALLBACK"
+    fi
+    mkdir -p "$DIAG_DIR"
+    log_ok "Diagnostic output: $DIAG_DIR"
+
+    # Helper: run a command, save output, log result
+    diag_run() {
+        local label="$1"
+        local outfile="${DIAG_DIR}/${label}"
+        shift
+        log "  Capturing: $label"
+        if "$@" > "$outfile" 2>&1; then
+            log_ok "  Saved: $outfile"
+        else
+            log_warn "  Command returned non-zero for $label (output still saved)"
+        fi
+    }
+
+    # Boot timing
+    diag_run "systemd-analyze.txt"           systemd-analyze
+    diag_run "systemd-blame.txt"             systemd-analyze blame
+    diag_run "systemd-critical-chain.txt"    systemd-analyze critical-chain
+
+    # Journal warnings from this boot
+    diag_run "journal-warnings.txt"          journalctl -b -p warning --no-pager
+
+    # Service state
+    diag_run "services-enabled.txt"          systemctl list-unit-files --state=enabled --no-pager
+    diag_run "services-failed.txt"           systemctl --failed --no-pager
+
+    # Network-wait units specifically (common boot bottleneck)
+    {
+        for svc in connman-wait-online NetworkManager-wait-online systemd-networkd-wait-online; do
+            echo "=== $svc ==="
+            systemctl status "$svc" --no-pager 2>&1 || true
+            echo ""
+        done
+    } > "${DIAG_DIR}/network-wait-status.txt"
+    log_ok "  Saved: network-wait-status.txt"
+
+    # USB gadget status (must survive optimizations)
+    {
+        for svc in bb-usb-gadgets usb-gadget; do
+            echo "=== $svc ==="
+            systemctl status "$svc" --no-pager 2>&1 || true
+            echo ""
+        done
+    } > "${DIAG_DIR}/usb-gadget-status.txt"
+    log_ok "  Saved: usb-gadget-status.txt"
+
+    # Full loaded module list (used to identify 3rd party driver candidates)
+    diag_run "lsmod.txt"                     lsmod
+
+    log_ok "Phase 1 complete. Diagnostics in: $DIAG_DIR"
+}
+
 # ── Main (stub — filled in Task 12) ──────────────────────────────────────────
 
 main() {
@@ -203,7 +270,15 @@ main() {
         exec bash "$RESTORE_SCRIPT"
     fi
 
-    log "Phases will be added in subsequent tasks."
+    run_diagnostics
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        log "Proceeding with --apply phases..."
+    else
+        log "DRY-RUN complete. No configuration changes were made."
+        log "Diagnostic files written to: ${DIAG_DIR:-$DIAG_DIR_FALLBACK}"
+        exit 0
+    fi
 }
 
 main "$@"
