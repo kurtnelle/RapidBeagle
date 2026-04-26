@@ -11,9 +11,15 @@
 #
 ################################################################################
 
-# Stable tag from https://github.com/aircrack-ng/rtl8812au/tags
-RTL8812AU_VERSION = v5.13.6
-RTL8812AU_SITE = $(call github,aircrack-ng,rtl8812au,$(RTL8812AU_VERSION))
+# morrownr/8812au-20210820 fork — much more aggressively tracks kernel API
+# changes than aircrack-ng. The aircrack-ng v5.13.6 tag doesn't compile
+# against Linux 6.6 (cfg80211_ch_switch_notify took an extra punct_bitmap
+# arg in 6.5+ for WiFi 7 support).
+#
+# Pin to a known-good tag from morrownr; bump as needed when newer kernels
+# break things again.
+RTL8812AU_VERSION = v5.15.0.2
+RTL8812AU_SITE = $(call github,morrownr,8812au-20210820,$(RTL8812AU_VERSION))
 RTL8812AU_LICENSE = GPL-2.0
 RTL8812AU_LICENSE_FILES = LICENSE
 
