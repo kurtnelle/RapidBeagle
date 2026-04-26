@@ -12,6 +12,14 @@ LOGFILE=/var/log/app.log
 BOOT_FLAG=/run/boot-complete
 
 start() {
+    # Record how long boot took (kernel start -> this point in init).
+    # /proc/uptime line: "<seconds_since_boot> <seconds_idle>"
+    read UPTIME _ < /proc/uptime
+    echo "boot_to_userspace_seconds: $UPTIME" > /run/boot-time.log
+    echo "boot_kernel_release: $(uname -r)" >> /run/boot-time.log
+    echo "boot_date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> /run/boot-time.log
+    echo "S99-app-launcher: kernel-to-userspace took ${UPTIME}s"
+
     # Mark boot complete so the heartbeat transitions to "boot done"
     touch "$BOOT_FLAG"
 
