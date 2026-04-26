@@ -45,26 +45,42 @@ Hardware: Edimax AC600 USB dongle, USB ID `7392:a812`, **RTL8811AU chipset**.
    - `obj-m` empty until we passed `CONFIG_RTL8821AU=m` (note: 8821**AU**, not 8812AU like the other forks)
    - `_FW_UNDER_SURVEY` symbol-rename inconsistency (same as morrownr/8812au) — sed-fixed via POST_EXTRACT hook
 
-### Build at handoff time
+### Build status at handoff: ✅ COMPLETE
 
-A build is running in the background on WSL2 (`/tmp/buildroot-build28.log`) with both fixes applied:
-- `CONFIG_RTL8821AU=m` in MODULE_MAKE_OPTS
-- `_FW_UNDER_SURVEY → WIFI_UNDER_SURVEY` sed hook on `core/rtw_xmit.c`
+The morrownr/8821au-20210708 build succeeded with both fixes (`CONFIG_RTL8821AU=m` + `_FW_UNDER_SURVEY` sed). Module produced: `/lib/modules/6.6.30/updates/8821au.ko`.
 
-**Next step in fresh chat:** check that build's outcome:
+**Image already downloaded and ready to flash:**
 
-```bash
-ssh -p 2222 root@localhost "ls -la ~/buildroot/output/images/sdcard.img 2>&1 | head -1; ps aux|grep -E 'cc1|^make'|grep -v grep|wc -l; find ~/buildroot/output/target/lib/modules/6.6.30/updates -name '*.ko' 2>/dev/null; tail -5 /tmp/buildroot-build28.log"
+```
+I:\Source\repos\RapidBeagle\dist\sdcard.img
+MD5: fa3311cd7365ba051602c0d05a70c22e
+Size: 529 MB
 ```
 
-If `8821au.ko` is in `/lib/modules/6.6.30/updates/`, download:
+**Next step in fresh chat: have user reflash, then verify WiFi end-to-end.**
+
+After flash + boot:
+
 ```bash
-scp -P 2222 root@localhost:/root/buildroot/output/images/sdcard.img I:/Source/repos/RapidBeagle/dist/sdcard.img
+# Always run before SSH after reflash — fresh sshd host key
+ssh-keygen -R 192.168.7.2
+
+# WiFi sanity check
+ssh root@192.168.7.2 "lsmod | grep 8821; ip link show wlan0; dmesg | grep -iE 'rtw|wlan|FWFreeToGo' | tail -15"
 ```
 
-Then have user reflash and check via serial / SSH:
+**Three possible outcomes:**
+
+1. **Best case:** `wlan0` exists, dmesg shows successful firmware download (no `FWFreeToGo` failure), `iw wlan0 scan` returns SSIDs. → WiFi works. Move on to overlayfs / cosmetic todos.
+
+2. **Same as before:** `wlan0` exists but dmesg has `_FWFreeToGo: Polling FW ready Fail!`. → Confirmed kernel-6.6 + AM335x MUSB issue with this whole driver lineage. Recommend dongle swap to TL-WN722N v1 (AR9271, mainline `ath9k_htc` already built into our kernel — just need `linux-firmware`). User has alternate dongles.
+
+3. **Different failure:** new dmesg signature → diagnose from there.
+
+Quick scan test (after `wlan0` is up):
+
 ```bash
-ssh root@192.168.7.2 "lsmod | grep 8821; ip link show wlan0; dmesg | grep -iE 'rtw|wlan|FWFreeToGo' | tail"
+ssh root@192.168.7.2 "ip link set wlan0 up; iw wlan0 scan 2>&1 | grep SSID | head"
 ```
 
 ### Failure-recovery branches
