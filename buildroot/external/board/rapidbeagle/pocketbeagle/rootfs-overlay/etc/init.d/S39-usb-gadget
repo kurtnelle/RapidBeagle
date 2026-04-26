@@ -58,24 +58,19 @@ start() {
     echo "RapidBeagle"           > strings/0x409/manufacturer
     echo "RapidBeagle USB Gadget" > strings/0x409/product
 
-    # ── Configuration 1: RNDIS only (selected by Windows via OS descriptor) ──
+    # ── Configuration 1: CDC-NCM (Windows 8.1+, Linux 3.x+, macOS 10.10+) ────
+    # NCM uses standard CDC class IDs that Windows recognizes natively as
+    # "USB NCM Host Device" — no OS descriptor magic required.
+    # Linux 6.x removed CONFIG_USB_RNDIS_WCEIS, so f_rndis identifies as ACM
+    # and Windows treats it as a COM port — that's why we use NCM, not RNDIS.
     mkdir -p configs/c.1/strings/0x409
-    echo "RNDIS"  > configs/c.1/strings/0x409/configuration
-    echo 250      > configs/c.1/MaxPower
+    echo "CDC NCM" > configs/c.1/strings/0x409/configuration
+    echo 250       > configs/c.1/MaxPower
 
-    # OS descriptors steer Windows to config 1 / RNDIS.
-    echo 1       > os_desc/use
-    echo 0xcd    > os_desc/b_vendor_code
-    echo MSFT100 > os_desc/qw_sign
+    mkdir -p functions/ncm.usb0
+    ln -sf functions/ncm.usb0 configs/c.1/
 
-    mkdir -p functions/rndis.usb0
-    # OS descriptor for the RNDIS function — tells Windows "I am RNDIS"
-    echo RNDIS    > functions/rndis.usb0/os_desc/interface.rndis/compatible_id
-    echo 5162001  > functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id 2>/dev/null || true
-    ln -sf functions/rndis.usb0 configs/c.1/
-    ln -sf configs/c.1          os_desc/
-
-    # ── Configuration 2: CDC-ECM only (selected by Linux / macOS / BMPCC4K) ──
+    # ── Configuration 2: CDC-ECM (legacy Linux / older firmware fallback) ────
     mkdir -p configs/c.2/strings/0x409
     echo "CDC ECM" > configs/c.2/strings/0x409/configuration
     echo 250       > configs/c.2/MaxPower
@@ -111,14 +106,14 @@ stop() {
     echo "" > UDC 2>/dev/null
 
     # Symlinks first
-    rm -f configs/c.1/rndis.usb0 configs/c.2/ecm.usb0 os_desc/c.1
+    rm -f configs/c.1/ncm.usb0 configs/c.2/ecm.usb0
     # Config dirs
     rmdir configs/c.1/strings/0x409 2>/dev/null
     rmdir configs/c.1                2>/dev/null
     rmdir configs/c.2/strings/0x409 2>/dev/null
     rmdir configs/c.2                2>/dev/null
     # Functions
-    rmdir functions/rndis.usb0       2>/dev/null
+    rmdir functions/ncm.usb0         2>/dev/null
     rmdir functions/ecm.usb0         2>/dev/null
     rmdir strings/0x409              2>/dev/null
     cd /
