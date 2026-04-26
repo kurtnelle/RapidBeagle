@@ -1,0 +1,20 @@
+# /etc/network/interfaces — RapidBeagle networking
+# usb0:  USB gadget — static 192.168.7.2/24 (host expected at 192.168.7.1)
+# eth0:  ethernet (none on PocketBeagle, but config kept for general AM335x)
+# wlan0: NOT brought up here. The dotnet app drives wpa_supplicant via control socket.
+
+auto lo
+iface lo inet loopback
+
+auto usb0
+iface usb0 inet static
+    address 192.168.7.2
+    netmask 255.255.255.0
+
+# Pre-up retry: usb0 may not exist if the USB gadget driver hasn't loaded yet.
+# Make 'auto usb0' a best-effort attempt rather than a hard failure.
+allow-hotplug usb0
+
+# eth0 — DHCP if interface is present (skipped automatically if not).
+allow-hotplug eth0
+iface eth0 inet dhcp
