@@ -16,6 +16,11 @@ BR2_TOOLCHAIN_BUILDROOT_CXX=y
 # ── Bootloader: U-Boot ───────────────────────────────────────────────────────
 BR2_TARGET_UBOOT=y
 BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+# Pin to 2023.10 — U-Boot 2024.01 has a known timer-init regression on
+# AM335x that boot-loops the PocketBeagle. Reference: Buildroot's own
+# beaglebone_defconfig also pins to 2023.10 for the same reason.
+BR2_TARGET_UBOOT_CUSTOM_VERSION=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2023.10"
 BR2_TARGET_UBOOT_BOARD_DEFCONFIG="am335x_evm"
 BR2_TARGET_UBOOT_FORMAT_IMG=y
 BR2_TARGET_UBOOT_SPL=y
