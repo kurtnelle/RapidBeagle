@@ -39,40 +39,49 @@ start() {
     mkdir -p $GADGET || return 1
     cd $GADGET || return 1
 
-    # Identify ourselves to the host
+    # Identify ourselves to the host. Set device class to 0 (composite, classes
+    # described per-interface) — each config holds a single function so we don't
+    # need IAD here. This is the same setup BeagleBoard.org Debian images use.
     echo 0x1d6b > idVendor          # Linux Foundation
     echo 0x0104 > idProduct         # Multifunction Composite Gadget
     echo 0x0100 > bcdDevice
     echo 0x0200 > bcdUSB
-    echo 0xEF   > bDeviceClass      # Miscellaneous (allows IAD)
-    echo 0x02   > bDeviceSubClass
-    echo 0x01   > bDeviceProtocol
+    echo 0x00   > bDeviceClass
+    echo 0x00   > bDeviceSubClass
+    echo 0x00   > bDeviceProtocol
 
+    # Stable serial — the same MAC seed every boot avoids Windows creating a
+    # new driver record on every reboot and producing ghost devices.
+    SERIAL="rapidbeagle-$(cat /etc/machine-id 2>/dev/null | head -c 12 || echo deadbeefcafe)"
     mkdir -p strings/0x409
-    echo "rapidbeagle-$(cat /sys/class/net/eth0/address 2>/dev/null | tr -d : || echo 000000)" > strings/0x409/serialnumber
+    echo "$SERIAL"               > strings/0x409/serialnumber
     echo "RapidBeagle"           > strings/0x409/manufacturer
     echo "RapidBeagle USB Gadget" > strings/0x409/product
 
-    # Configuration 1
+    # ── Configuration 1: RNDIS only (selected by Windows via OS descriptor) ──
     mkdir -p configs/c.1/strings/0x409
-    echo "RNDIS + ECM" > configs/c.1/strings/0x409/configuration
-    echo 250           > configs/c.1/MaxPower
+    echo "RNDIS"  > configs/c.1/strings/0x409/configuration
+    echo 250      > configs/c.1/MaxPower
 
-    # OS descriptors so Windows auto-binds RNDIS
+    # OS descriptors steer Windows to config 1 / RNDIS.
     echo 1       > os_desc/use
     echo 0xcd    > os_desc/b_vendor_code
     echo MSFT100 > os_desc/qw_sign
 
-    # RNDIS function (Windows)
     mkdir -p functions/rndis.usb0
+    # OS descriptor for the RNDIS function — tells Windows "I am RNDIS"
     echo RNDIS    > functions/rndis.usb0/os_desc/interface.rndis/compatible_id
     echo 5162001  > functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id 2>/dev/null || true
     ln -sf functions/rndis.usb0 configs/c.1/
-    ln -sf configs/c.1 os_desc/
+    ln -sf configs/c.1          os_desc/
 
-    # ECM function (Linux/macOS)
+    # ── Configuration 2: CDC-ECM only (selected by Linux / macOS / BMPCC4K) ──
+    mkdir -p configs/c.2/strings/0x409
+    echo "CDC ECM" > configs/c.2/strings/0x409/configuration
+    echo 250       > configs/c.2/MaxPower
+
     mkdir -p functions/ecm.usb0
-    ln -sf functions/ecm.usb0 configs/c.1/
+    ln -sf functions/ecm.usb0 configs/c.2/
 
     # Bind to the first available USB Device Controller
     UDC=$(ls $UDC_PATH 2>/dev/null | head -n1)
@@ -101,9 +110,14 @@ stop() {
     # Unbind first — required before removing functions
     echo "" > UDC 2>/dev/null
 
-    rm -f configs/c.1/rndis.usb0 configs/c.1/ecm.usb0 os_desc/c.1
+    # Symlinks first
+    rm -f configs/c.1/rndis.usb0 configs/c.2/ecm.usb0 os_desc/c.1
+    # Config dirs
     rmdir configs/c.1/strings/0x409 2>/dev/null
     rmdir configs/c.1                2>/dev/null
+    rmdir configs/c.2/strings/0x409 2>/dev/null
+    rmdir configs/c.2                2>/dev/null
+    # Functions
     rmdir functions/rndis.usb0       2>/dev/null
     rmdir functions/ecm.usb0         2>/dev/null
     rmdir strings/0x409              2>/dev/null
