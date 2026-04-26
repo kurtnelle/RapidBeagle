@@ -39,5 +39,14 @@ RTL8812AU_MODULE_MAKE_OPTS = \
 	CONFIG_RTL8821AU=m \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
 
+# morrownr forks share an internal-symbol rename inconsistency: the codebase
+# globally renamed _FW_UNDER_SURVEY → WIFI_UNDER_SURVEY but two call sites
+# in core/rtw_xmit.c still use the old name. Without this fix:
+#   error: '_FW_UNDER_SURVEY' undeclared (first use in this function)
+define RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
+	$(SED) 's/_FW_UNDER_SURVEY/WIFI_UNDER_SURVEY/g' $(@D)/core/rtw_xmit.c
+endef
+RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
+
 $(eval $(kernel-module))
 $(eval $(generic-package))
