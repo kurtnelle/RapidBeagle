@@ -900,33 +900,189 @@ DOTNETUNIT
     log_ok "Phase 9 complete."
 }
 
-# ── Main (stub — filled in Task 12) ──────────────────────────────────────────
+# ── Restore Script Generation ─────────────────────────────────────────────────
+# Generates restore-pocketbeagle-boot.sh based on the .applied-manifest.
+# The restore script is self-contained — it does NOT source the main script.
+# It re-enables exactly the services that were disabled, and removes exactly
+# the files that were created.
+
+generate_restore_script() {
+    log "--- Generating Restore Script ---"
+
+    if [[ ! -f "$MANIFEST_FILE" ]]; then
+        log_warn "No manifest found at $MANIFEST_FILE — cannot generate restore script"
+        return
+    fi
+
+    log_action "Generate: $RESTORE_SCRIPT"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+
+        # Read manifest entries
+        local services_to_reenable=()
+        local files_to_remove=()
+        local cmdline_files=()
+        local installed_services=()
+
+        while IFS='|' read -r type value; do
+            [[ "$type" == "#"* ]] && continue
+            [[ -z "$type" ]]      && continue
+            case "$type" in
+                SERVICE)           services_to_reenable+=("$value") ;;
+                BLACKLIST)         files_to_remove+=("$value") ;;
+                NM_CONF)           files_to_remove+=("$value") ;;
+                USB0_STATIC)       files_to_remove+=("$value") ;;
+                CMDLINE)           cmdline_files+=("$value") ;;
+                SERVICE_INSTALLED) installed_services+=("$value") ;;
+            esac
+        done < "$MANIFEST_FILE"
+
+        # Build the re-enable block
+        local reenable_block=""
+        for svc in "${services_to_reenable[@]+"${services_to_reenable[@]}"}"; do
+            reenable_block+="    log \"Re-enabling: ${svc}.service\"\n"
+            reenable_block+="    systemctl enable \"${svc}.service\" 2>/dev/null || log_warn \"Could not re-enable ${svc}\"\n"
+        done
+
+        # Build the file-remove block
+        local remove_block=""
+        for f in "${files_to_remove[@]+"${files_to_remove[@]}"}"; do
+            remove_block+="    safe_remove \"${f}\"\n"
+        done
+
+        # Build the cmdline restore block
+        local cmdline_block=""
+        for f in "${cmdline_files[@]+"${cmdline_files[@]}"}"; do
+            cmdline_block+="    if [[ -f \"${f}.bak\" ]]; then\n"
+            cmdline_block+="        log \"Restoring cmdline: ${f} from ${f}.bak\"\n"
+            cmdline_block+="        cp \"${f}.bak\" \"${f}\" && rm \"${f}.bak\"\n"
+            cmdline_block+="        log_ok \"Cmdline restored\"\n"
+            cmdline_block+="    else\n"
+            cmdline_block+="        log_warn \"No backup found for ${f} — skipping cmdline restore\"\n"
+            cmdline_block+="    fi\n"
+        done
+
+        # Build the installed-services remove block
+        local installed_block=""
+        local heartbeat_script_path="$HEARTBEAT_SCRIPT"
+        for svc in "${installed_services[@]+"${installed_services[@]}"}"; do
+            installed_block+="    log \"Removing installed service: ${svc}\"\n"
+            installed_block+="    systemctl disable --now \"${svc}.service\" 2>/dev/null || true\n"
+            installed_block+="    safe_remove \"/etc/systemd/system/${svc}.service\"\n"
+            if [[ "$svc" == "pb-heartbeat" ]]; then
+                installed_block+="    safe_remove \"${heartbeat_script_path}\"\n"
+            fi
+        done
+
+        # Write the restore script
+        # NOTE: outer heredoc uses unquoted RESTORESCRIPT so variables expand NOW (at generate time).
+        # The inner \$EUID, \$*, etc. are escaped to remain as literals in the generated script.
+        cat > "$RESTORE_SCRIPT" <<RESTORESCRIPT
+#!/usr/bin/env bash
+# =============================================================================
+# restore-pocketbeagle-boot.sh — Undo all changes made by optimize script
+# Generated: $(date)
+# Manifest:  $MANIFEST_FILE
+#
+# USAGE: sudo ./restore-pocketbeagle-boot.sh
+# =============================================================================
+
+set -euo pipefail
+
+if [[ "\$EUID" -ne 0 ]]; then
+    echo "ERROR: Must run as root." >&2
+    exit 1
+fi
+
+log()      { echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$*"; }
+log_ok()   { log "[OK]    \$*"; }
+log_warn() { log "[WARN]  \$*"; }
+
+safe_remove() {
+    local f="\$1"
+    if [[ -f "\$f" ]]; then
+        log "Removing: \$f"
+        rm "\$f"
+        log_ok "Removed: \$f"
+    else
+        log "[SKIP] Not found (already removed?): \$f"
+    fi
+}
+
+log "============================================================"
+log "PocketBeagle Boot Restore"
+log "============================================================"
+
+log "--- Step 1: Re-enabling disabled services ---"
+$(printf '%b' "$reenable_block")
+log "--- Step 2: Removing created config files ---"
+$(printf '%b' "$remove_block")
+log "--- Step 3: Restoring kernel cmdline ---"
+$(printf '%b' "$cmdline_block")
+log "--- Step 4: Removing installed services ---"
+$(printf '%b' "$installed_block")
+log "--- Step 5: Final reload ---"
+systemctl daemon-reload
+log_ok "systemd daemon reloaded"
+
+# Rebuild initramfs to remove blacklist effect
+if command -v update-initramfs &>/dev/null; then
+    log "Rebuilding initramfs to remove module blacklist..."
+    update-initramfs -u
+    log_ok "initramfs rebuilt"
+fi
+
+log "============================================================"
+log "Restore complete. Reboot to apply all changes."
+log "NOTE: dotnet-app.service and 'dotnet' system user are NOT removed."
+log "      Remove manually if needed:"
+log "        systemctl disable --now dotnet-app"
+log "        rm /etc/systemd/system/dotnet-app.service"
+log "        userdel dotnet"
+log "============================================================"
+RESTORESCRIPT
+
+        chmod +x "$RESTORE_SCRIPT"
+        log_ok "Restore script generated: $RESTORE_SCRIPT"
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 main() {
     parse_args "$@"
-    check_guards
     setup_logging
 
-    # Handle --restore mode immediately — delegate to restore script
+    # Handle --restore before guard checks — the restore script has its own root check
     if [[ "$MODE" == "--restore" ]]; then
         if [[ ! -f "$RESTORE_SCRIPT" ]]; then
-            log_err "Restore script not found: $RESTORE_SCRIPT"
-            log_err "Run --apply first to generate it."
+            echo "ERROR: Restore script not found: $RESTORE_SCRIPT" >&2
+            echo "       Run --apply first to generate it." >&2
             exit 1
         fi
         log "Delegating to restore script: $RESTORE_SCRIPT"
         exec bash "$RESTORE_SCRIPT"
     fi
 
+    check_guards
+
+    log ""
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log "╔══════════════════════════════════════════════════════════╗"
+        log "║  DRY-RUN MODE — No configuration changes will be made   ║"
+        log "║  Diagnostic files WILL be written (read-only capture)   ║"
+        log "╚══════════════════════════════════════════════════════════╝"
+    else
+        log "╔══════════════════════════════════════════════════════════╗"
+        log "║  APPLY MODE — All optimizations will be applied         ║"
+        log "╚══════════════════════════════════════════════════════════╝"
+    fi
+    log ""
+
+    # Phase 1: always runs (diagnostic writes are OK in dry-run)
     run_diagnostics
 
-    if [[ "$DRY_RUN" -eq 0 ]]; then
-        log "Proceeding with --apply phases..."
-    else
-        # In dry-run, still walk through all phases for preview output
-        DRY_RUN=1
-    fi
-
+    # Phases 2-9: log_action() prints previews in dry-run, executes in apply
     disable_services
     write_module_blacklist
     patch_kernel_cmdline
@@ -936,10 +1092,37 @@ main() {
     configure_usb0_static
     install_dotnet_placeholder
 
+    # Restore script generation: apply mode only (needs a real manifest)
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        generate_restore_script
+    fi
+
+    log ""
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        log "DRY-RUN complete. No configuration changes were made."
-        log "Diagnostic files written to: ${DIAG_DIR:-$DIAG_DIR_FALLBACK}"
-        exit 0
+        log "╔══════════════════════════════════════════════════════════╗"
+        log "║  DRY-RUN COMPLETE                                        ║"
+        log "║  Review the output above, then run:                     ║"
+        log "║    sudo ./optimize-pocketbeagle-boot.sh --apply         ║"
+        log "╚══════════════════════════════════════════════════════════╝"
+    else
+        log "╔══════════════════════════════════════════════════════════╗"
+        log "║  OPTIMIZATION COMPLETE                                   ║"
+        log "╠══════════════════════════════════════════════════════════╣"
+        log "║  Next steps:                                             ║"
+        log "║  1. Reboot the device: sudo reboot                      ║"
+        log "║  2. Watch USR0 LED — rapid blink = booting              ║"
+        log "║  3. Check: cat /boot/firmware/BOOT_COMPLETE.txt         ║"
+        log "║  4. Deploy dotnet app to /opt/app/                      ║"
+        log "║  5. Edit /etc/systemd/system/dotnet-app.service         ║"
+        log "║  6. systemctl enable --now dotnet-app                   ║"
+        log "╠══════════════════════════════════════════════════════════╣"
+        log "║  To undo all changes:                                   ║"
+        log "║    sudo ./optimize-pocketbeagle-boot.sh --restore       ║"
+        log "╚══════════════════════════════════════════════════════════╝"
+        log ""
+        log "  Manifest: $MANIFEST_FILE"
+        log "  Log:      $LOG_FILE"
+        log "  Restore:  $RESTORE_SCRIPT"
     fi
 }
 
