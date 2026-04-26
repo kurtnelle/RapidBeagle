@@ -1,0 +1,61 @@
+#!/bin/sh
+# S99-app-launcher — launch the RapidBeagle dotnet AOT application
+#
+# Convention: the AOT-compiled binary is dropped at /opt/app/rapidbeagle-app
+# via `scp` after first boot. If the binary is missing or non-executable,
+# this script silently exits 0 — the device still boots, SSH works, and
+# you can deploy and reboot.
+
+APP=/opt/app/rapidbeagle-app
+PIDFILE=/run/app.pid
+LOGFILE=/var/log/app.log
+BOOT_FLAG=/run/boot-complete
+
+start() {
+    # Mark boot complete so the heartbeat transitions to "boot done"
+    touch "$BOOT_FLAG"
+
+    if [ ! -x "$APP" ]; then
+        echo "S99-app-launcher: $APP not found or not executable — skipping"
+        return 0
+    fi
+
+    # Make sure /var/log exists (it's tmpfs, recreated each boot)
+    mkdir -p /var/log
+
+    # Launch the app in background, capture PID
+    "$APP" >> "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "S99-app-launcher: started $APP (pid $(cat "$PIDFILE"))"
+}
+
+stop() {
+    if [ -f "$PIDFILE" ]; then
+        APID=$(cat "$PIDFILE" 2>/dev/null)
+        if [ -n "$APID" ] && [ -d "/proc/$APID" ]; then
+            kill "$APID" 2>/dev/null || true
+            # Give it 5 seconds to exit gracefully
+            i=0
+            while [ -d "/proc/$APID" ] && [ "$i" -lt 5 ]; do
+                sleep 1
+                i=$((i + 1))
+            done
+            # Force-kill if still alive
+            [ -d "/proc/$APID" ] && kill -9 "$APID" 2>/dev/null || true
+        fi
+        rm -f "$PIDFILE"
+    fi
+    echo "S99-app-launcher: stopped"
+}
+
+case "$1" in
+    start) start ;;
+    stop)  stop ;;
+    restart) stop; start ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
