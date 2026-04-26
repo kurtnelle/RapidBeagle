@@ -6,15 +6,17 @@
 auto lo
 iface lo inet loopback
 
-auto usb0
+# usb0 (USB gadget) — brought up when the kernel enumerates the gadget device.
+# allow-hotplug makes ifup wait for the kernel uevent rather than failing
+# at boot if the gadget driver isn't ready yet.
+# NOTE: do NOT also use 'auto usb0' here — ifup treats both directives on
+# the same interface as a duplicate option and aborts.
+allow-hotplug usb0
 iface usb0 inet static
     address 192.168.7.2
     netmask 255.255.255.0
 
-# Pre-up retry: usb0 may not exist if the USB gadget driver hasn't loaded yet.
-# Make 'auto usb0' a best-effort attempt rather than a hard failure.
-allow-hotplug usb0
-
-# eth0 — DHCP if interface is present (skipped automatically if not).
+# eth0 — DHCP if interface is present (no eth0 on stock PocketBeagle, but
+# kept here as a no-op for general AM335x boards).
 allow-hotplug eth0
 iface eth0 inet dhcp
