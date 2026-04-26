@@ -16,11 +16,14 @@ BR2_TOOLCHAIN_BUILDROOT_CXX=y
 # ── Bootloader: U-Boot ───────────────────────────────────────────────────────
 BR2_TARGET_UBOOT=y
 BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
-# Pin to 2023.10 — U-Boot 2024.01 has a known timer-init regression on
-# AM335x that boot-loops the PocketBeagle. Reference: Buildroot's own
-# beaglebone_defconfig also pins to 2023.10 for the same reason.
-BR2_TARGET_UBOOT_CUSTOM_VERSION=y
-BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2023.10"
+# Use BeagleBoard.org's U-Boot fork — their patches fix the AM335x timer-init
+# regression on PocketBeagle. Mainline U-Boot's am335x_evm_defconfig identifies
+# the board correctly via EEPROM but fails dm_timer_init() with -ENODEV.
+# This is the same fork used by BeagleBoard.org's official Debian images.
+# Latest stable AM335x branch as of 2026: v2022.04-bbb.io-am335x-am57xx.
+BR2_TARGET_UBOOT_CUSTOM_GIT=y
+BR2_TARGET_UBOOT_CUSTOM_REPO_URL="https://git.beagleboard.org/beagleboard/u-boot.git"
+BR2_TARGET_UBOOT_CUSTOM_REPO_VERSION="v2022.04-bbb.io-am335x-am57xx"
 BR2_TARGET_UBOOT_BOARD_DEFCONFIG="am335x_evm"
 BR2_TARGET_UBOOT_FORMAT_IMG=y
 BR2_TARGET_UBOOT_SPL=y
