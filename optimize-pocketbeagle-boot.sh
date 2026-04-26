@@ -794,6 +794,112 @@ USB0CONF
     log_ok "Phase 8 complete."
 }
 
+# ── Phase 9: dotnet App Placeholder ──────────────────────────────────────────
+# Installs dotnet-app.service (DISABLED) as a ready-to-use template.
+# Also creates the "dotnet" system user so the service slot is ready to activate
+# immediately after "dotnet publish" drops the app onto the device.
+#
+# To activate after deploying your app:
+#   1. Edit /etc/systemd/system/dotnet-app.service — update ExecStart path
+#   2. systemctl enable --now dotnet-app
+#
+# The service is intentionally Type=notify so systemd waits for the app to
+# signal readiness before declaring it active (cleaner dependency ordering).
+
+install_dotnet_placeholder() {
+    log "--- Phase 9: dotnet App Placeholder ---"
+
+    # Create "dotnet" system user (no shell, no home) if not already present
+    if id dotnet &>/dev/null; then
+        log_skip "System user 'dotnet' already exists"
+    else
+        log_action "Create system user: dotnet (no shell, no home dir)"
+        if [[ "$DRY_RUN" -eq 0 ]]; then
+            useradd \
+                --system \
+                --no-create-home \
+                --shell /usr/sbin/nologin \
+                --comment "dotnet application runner" \
+                dotnet
+            log_ok "System user 'dotnet' created"
+        fi
+    fi
+
+    # Idempotency: skip if service already exists
+    if [[ -f "$DOTNET_SERVICE" ]]; then
+        log_skip "dotnet-app.service already exists: $DOTNET_SERVICE — skipping"
+        return
+    fi
+
+    log_action "Install placeholder: $DOTNET_SERVICE (installed but DISABLED)"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+
+        cat > "$DOTNET_SERVICE" <<'DOTNETUNIT'
+# /etc/systemd/system/dotnet-app.service
+# dotnet application service — installed by optimize-pocketbeagle-boot.sh
+#
+# SETUP INSTRUCTIONS:
+#   1. Deploy your app:  scp -r publish/ root@192.168.7.2:/opt/app/
+#   2. Edit ExecStart below to point to your .dll
+#   3. Enable:          systemctl enable --now dotnet-app
+#
+# This service is intentionally left DISABLED until you deploy your application.
+# The "dotnet" system user is already created and ready.
+
+[Unit]
+Description=dotnet Application
+Documentation=https://learn.microsoft.com/en-us/dotnet/
+# Start after network is available and boot marker has run
+After=network.target pb-boot-marker.service
+Wants=network.target
+
+[Service]
+# Type=notify: systemd waits for app to call SD_NOTIFY("READY=1")
+# If your app does not use SD_NOTIFY, change to Type=simple
+Type=notify
+NotifyAccess=main
+
+# ── EDIT THIS LINE after deploying your app ──────────────────────────────────
+ExecStart=/usr/bin/dotnet /opt/app/YourApp.dll
+# ─────────────────────────────────────────────────────────────────────────────
+
+WorkingDirectory=/opt/app
+User=dotnet
+Group=dotnet
+
+# Restart on crash with 5-second backoff
+Restart=on-failure
+RestartSec=5
+
+# Environment — adjust as needed
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
+
+# Resource limits (optional — tune for your app)
+# LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+DOTNETUNIT
+
+        systemctl daemon-reload
+        # NOTE: intentionally NOT enabling — user enables after deploying app
+        log_ok "dotnet-app.service installed (DISABLED — enable after deploying app)"
+        log_ok "Next steps:"
+        log_ok "  1. scp -r publish/ root@<device>:/opt/app/"
+        log_ok "  2. Edit /etc/systemd/system/dotnet-app.service (update ExecStart)"
+        log_ok "  3. systemctl enable --now dotnet-app"
+
+        # Record in manifest for restore (dotnet user intentionally NOT restored)
+        if ! grep -qF "SERVICE_INSTALLED|dotnet-app" "$MANIFEST_FILE" 2>/dev/null; then
+            echo "SERVICE_INSTALLED|dotnet-app" >> "$MANIFEST_FILE"
+        fi
+    fi
+
+    log_ok "Phase 9 complete."
+}
+
 # ── Main (stub — filled in Task 12) ──────────────────────────────────────────
 
 main() {
@@ -828,6 +934,7 @@ main() {
     install_heartbeat_service
     install_boot_marker_service
     configure_usb0_static
+    install_dotnet_placeholder
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY-RUN complete. No configuration changes were made."
