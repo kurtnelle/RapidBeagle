@@ -1,81 +1,64 @@
 ################################################################################
 #
-# rtl8812au — out-of-tree driver for Realtek RTL8811AU / 8812AU / 8821AU /
-# 8814AU USB WiFi chipsets (e.g., Edimax EW-7811UTC AC600).
+# rtl8812au — out-of-tree driver for Realtek RTL8811AU / 8812AU / 8821AU
+# USB WiFi chipsets (e.g., Edimax EW-7811UTC AC600).
 #
 # Mainline Linux 6.6 has rtw88 (PCI-E AC chips) and rtl8xxxu (older 8188CU/
 # 8192CU N chips) but neither covers the USB-AC family. The aircrack-ng
-# fork is the de-facto mainstream driver for these chips.
+# fork is the most complete chipset-coverage option.
 #
 # Module name: 88XXau.ko
 #
+# We use the aircrack-ng fork because it's the only one that ships
+# RTL8821A source files needed for the RTL8811AU chipset (which the
+# Edimax AC600 uses). morrownr's fork is 8812AU-only — RTL8821A code
+# was stripped. v5.13.6 is the latest tagged release; it doesn't
+# compile clean against Linux 6.6 (cfg80211 API changes), so we patch
+# those two call sites via POST_EXTRACT hook.
+#
 ################################################################################
 
-# morrownr/8812au-20210820 fork — much more aggressively tracks kernel API
-# changes than aircrack-ng. The aircrack-ng v5.13.6 tag doesn't compile
-# against Linux 6.6 (cfg80211_ch_switch_notify took an extra punct_bitmap
-# arg in 6.5+ for WiFi 7 support).
-#
-# Pin to a known-good tag from morrownr; bump as needed when newer kernels
-# break things again.
-# morrownr's repo has no tags — pin to the current HEAD commit on main.
-# Bump as needed when a kernel API change breaks the build again.
-RTL8812AU_VERSION = 1be3d39079264fbc4763548ce9e9a26a5a9742ab
-RTL8812AU_SITE = $(call github,morrownr,8812au-20210820,$(RTL8812AU_VERSION))
+# Stable tag from https://github.com/aircrack-ng/rtl8812au/tags
+RTL8812AU_VERSION = v5.13.6
+RTL8812AU_SITE = $(call github,aircrack-ng,rtl8812au,$(RTL8812AU_VERSION))
 RTL8812AU_LICENSE = GPL-2.0
 RTL8812AU_LICENSE_FILES = LICENSE
 
-# Build flags. NOTE on the Makefile's CONFIG_PLATFORM_* options:
-#
-# Despite the name, CONFIG_PLATFORM_I386_PC is the "generic Linux" set of
-# flags — it does NOT hardcode an i386 toolchain or arch. The other named
-# platforms (TI_AM3517, ARM_RPI, etc.) hardcode CROSS_COMPILE and ARCH in
-# ways that fight Buildroot's kernel-module infrastructure (which already
-# sets ARCH=arm CROSS_COMPILE=arm-buildroot-...).
-#
-# So leave CONFIG_PLATFORM_I386_PC=y (the default) — Buildroot supplies
-# the actual ARCH and CROSS_COMPILE correctly. We only add target CFLAGS.
-#
-# This works equally well for ARMv7 (PocketBeagle 1) and aarch64
-# (PocketBeagle 2) — Buildroot's kernel-module build handles arch.
-#
-# CONFIG_RTL8812AU=m is the actual obj-m switch the Makefile checks at
-# kernel-build time:
-#     obj-$(CONFIG_RTL8812AU) := $(MODULE_NAME).o
-# Without this, obj-m is empty, no .c files compile, only MODPOST runs,
-# and no .ko file is produced. Standard `make` for this driver always
-# passes CONFIG_RTL8812AU=m on the command line.
 RTL8812AU_MODULE_MAKE_OPTS = \
 	CONFIG_RTL8812AU=m \
-	CONFIG_RTL8821A=y \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
-# CONFIG_RTL8821A=y is REQUIRED for the Edimax EW-7811UTC AC600 (chipset
-# RTL8811AU — handled by the RTL8821 codepath). The Makefile defaults this
-# to 'n' which strips all RTL8821 USB device entries from the compiled
-# module's device table, so MODULE_DEVICE_TABLE never sees them and the
-# kernel won't auto-bind the dongle.
+# Note on CONFIG_PLATFORM_*:
+#   The Makefile's CONFIG_PLATFORM_I386_PC is misleadingly named — it's the
+#   "generic Linux" path; doesn't hardcode an x86 toolchain. Buildroot
+#   already supplies ARCH/CROSS_COMPILE via -C $(LINUX_DIR), so we leave
+#   the default I386_PC=y. Setting alternative platform names breaks the
+#   build because they hardcode different toolchains.
 #
-# Do NOT set CONFIG_RTL8814A=y — that codepath references a header
-# (halrf/rtl8814a/halrf_iqk_8814a.h) that is not shipped in morrownr's
-# fork; build fails. If you want AC1900 quad-band support later, switch
-# to a different fork or patch in the missing header.
+# Note on chipset CONFIGs:
+#   The Makefile defaults CONFIG_RTL8812A=y, CONFIG_RTL8821A=y in this
+#   fork — both required for the Edimax AC600 (RTL8811AU → RTL8821A
+#   codepath). Don't override these; the morrownr fork stripped the 8821A
+#   source files, but aircrack-ng has them.
 
-# Fix for an internal symbol rename inconsistency in morrownr's main HEAD:
-# _FW_UNDER_SURVEY was globally renamed to WIFI_UNDER_SURVEY but two call
-# sites in rtw_xmit.c still use the old name, causing the build to fail
-# with "undeclared identifier" against Linux 6.6. Until upstream fixes it
-# we sed it ourselves right after the source is extracted.
-define RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
-	$(SED) 's/_FW_UNDER_SURVEY/WIFI_UNDER_SURVEY/g' $(@D)/core/rtw_xmit.c
+# ── Patch 1: Linux 6.5+ added `punct_bitmap` to cfg80211_ch_switch_notify
+# and cfg80211_ch_switch_started_notify (for 802.11be/WiFi 7). v5.13.6's
+# call sites don't pass it. Inject a `, 0` literal at the end of each
+# call. Two specific call sites in os_dep/linux/ioctl_cfg80211.c.
+define RTL8812AU_FIX_CFG80211_PUNCT_BITMAP
+	$(SED) 's|cfg80211_ch_switch_started_notify(adapter->pnetdev, &chdef, 0, 0, false);|cfg80211_ch_switch_started_notify(adapter->pnetdev, \&chdef, 0, 0, false, 0);|' \
+		$(@D)/os_dep/linux/ioctl_cfg80211.c
+	$(SED) 's|cfg80211_ch_switch_notify(adapter->pnetdev, &chdef, 0);|cfg80211_ch_switch_notify(adapter->pnetdev, \&chdef, 0, 0);|' \
+		$(@D)/os_dep/linux/ioctl_cfg80211.c
 endef
-RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
+RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_CFG80211_PUNCT_BITMAP
 
-# Add Edimax EW-7811UTC AC600 (USB ID 7392:a812) — RTL8811AU chipset, classifies
-# as RTL8821 in this driver. The morrownr fork's USB ID table covers most
-# Edimax variants (0xA811, 0xA822, 0xA834) but misses 0xA812 specifically.
-# Inject the missing line right after the existing 0xA811 entry.
+# ── Patch 2: Add Edimax EW-7811UTC AC600 (USB ID 7392:a812) to the device
+# table. aircrack-ng v5.13.6 covers other Edimax variants (0xA811, 0xA822,
+# 0xA834) but misses 0xA812 specifically. Same RTL8811AU chipset → handled
+# as RTL8821 family by this driver.
 define RTL8812AU_ADD_EDIMAX_AC600_ID
-	$(SED) '/0x7392, 0xA811.*Edimax/a\	{USB_DEVICE(0x7392, 0xA812), .driver_info = RTL8821}, /* Edimax EW-7811UTC AC600 */' $(@D)/os_dep/linux/usb_intf.c
+	grep -q '0x7392, 0xA812' $(@D)/os_dep/linux/usb_intf.c || \
+		$(SED) '/0x7392, 0xA811.*Edimax/a\	{USB_DEVICE(0x7392, 0xA812), .driver_info = RTL8821}, /* Edimax EW-7811UTC AC600 */' $(@D)/os_dep/linux/usb_intf.c
 endef
 RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_ADD_EDIMAX_AC600_ID
 
