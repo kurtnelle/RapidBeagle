@@ -397,6 +397,81 @@ BLACKLIST
     log_ok "Phase 3 complete."
 }
 
+# ── Phase 4: Kernel Cmdline Optimization ─────────────────────────────────────
+# Appends "quiet loglevel=3" to the kernel boot arguments.
+# This suppresses printk console output, reducing serial I/O overhead during boot.
+#
+# Detects cmdline file automatically:
+#   1. /boot/firmware/extlinux/extlinux.conf  (BeagleBone Debian >= Buster)
+#   2. /boot/cmdline.txt                      (older images / Raspberry Pi style)
+#
+# Backs up original file as .bak before patching.
+# Idempotent: skips if "quiet" is already present in the cmdline.
+
+patch_kernel_cmdline() {
+    log "--- Phase 4: Kernel Cmdline Optimization ---"
+
+    # Detect which cmdline file is present
+    local cmdline_file=""
+    if [[ -f "/boot/firmware/extlinux/extlinux.conf" ]]; then
+        cmdline_file="/boot/firmware/extlinux/extlinux.conf"
+        log_ok "Detected extlinux config: $cmdline_file"
+    elif [[ -f "/boot/cmdline.txt" ]]; then
+        cmdline_file="/boot/cmdline.txt"
+        log_ok "Detected cmdline.txt: $cmdline_file"
+    else
+        log_warn "No kernel cmdline file found at known paths — skipping Phase 4"
+        log_warn "Checked: /boot/firmware/extlinux/extlinux.conf, /boot/cmdline.txt"
+        return
+    fi
+
+    # Idempotency: skip if "quiet" is already present
+    if grep -q "quiet" "$cmdline_file"; then
+        log_skip "'quiet' already present in $cmdline_file — skipping"
+        return
+    fi
+
+    log_action "Patch $cmdline_file — append 'quiet loglevel=3' to kernel args"
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        # Backup original before any modifications
+        local bak_file="${cmdline_file}.bak"
+        if [[ ! -f "$bak_file" ]]; then
+            cp "$cmdline_file" "$bak_file"
+            log_ok "Backup created: $bak_file"
+        else
+            log_skip "Backup already exists: $bak_file"
+        fi
+
+        # Patch: For extlinux.conf, the kernel args are on the "append" line.
+        # For cmdline.txt, the entire file is one line of kernel args.
+        if [[ "$cmdline_file" == *"extlinux.conf" ]]; then
+            # Append to the "append" directive line (the kernel arguments line)
+            sed -i '/^\s*append\s/s/$/ quiet loglevel=3/' "$cmdline_file"
+            log_ok "Patched extlinux append line"
+        else
+            # cmdline.txt: single line, append args to end
+            sed -i 's/$/ quiet loglevel=3/' "$cmdline_file"
+            log_ok "Patched cmdline.txt"
+        fi
+
+        # Record in manifest for restore
+        if ! grep -qF "CMDLINE|${cmdline_file}" "$MANIFEST_FILE" 2>/dev/null; then
+            echo "CMDLINE|${cmdline_file}" >> "$MANIFEST_FILE"
+        fi
+
+        # Verify patch
+        if grep -q "quiet" "$cmdline_file"; then
+            log_ok "Verified: 'quiet' present in $cmdline_file"
+        else
+            log_err "Patch verification failed — 'quiet' not found after edit"
+            exit 1
+        fi
+    fi
+
+    log_ok "Phase 4 complete."
+}
+
 # ── Main (stub — filled in Task 12) ──────────────────────────────────────────
 
 main() {
@@ -426,6 +501,7 @@ main() {
 
     disable_services
     write_module_blacklist
+    patch_kernel_cmdline
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY-RUN complete. No configuration changes were made."
