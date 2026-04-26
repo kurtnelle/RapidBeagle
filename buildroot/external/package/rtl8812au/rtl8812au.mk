@@ -17,12 +17,20 @@ RTL8812AU_SITE = $(call github,aircrack-ng,rtl8812au,$(RTL8812AU_VERSION))
 RTL8812AU_LICENSE = GPL-2.0
 RTL8812AU_LICENSE_FILES = LICENSE
 
-# Build flags — disable platforms we're not on, force ARM for AM335x.
-# The driver's Makefile is platform-conditional via these CONFIG_PLATFORM_* vars.
-# For PocketBeagle 2 (aarch64), switch to CONFIG_PLATFORM_ARM_AARCH64=y.
+# Build flags. NOTE on the Makefile's CONFIG_PLATFORM_* options:
+#
+# Despite the name, CONFIG_PLATFORM_I386_PC is the "generic Linux" set of
+# flags — it does NOT hardcode an i386 toolchain or arch. The other named
+# platforms (TI_AM3517, ARM_RPI, etc.) hardcode CROSS_COMPILE and ARCH in
+# ways that fight Buildroot's kernel-module infrastructure (which already
+# sets ARCH=arm CROSS_COMPILE=arm-buildroot-...).
+#
+# So leave CONFIG_PLATFORM_I386_PC=y (the default) — Buildroot supplies
+# the actual ARCH and CROSS_COMPILE correctly. We only add target CFLAGS.
+#
+# This works equally well for ARMv7 (PocketBeagle 1) and aarch64
+# (PocketBeagle 2) — Buildroot's kernel-module build handles arch.
 RTL8812AU_MODULE_MAKE_OPTS = \
-	CONFIG_PLATFORM_I386_PC=n \
-	CONFIG_PLATFORM_ARM_AM335X=y \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
 
 $(eval $(kernel-module))
