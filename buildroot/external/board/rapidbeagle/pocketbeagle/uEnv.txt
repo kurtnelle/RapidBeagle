@@ -1,0 +1,23 @@
+# uEnv.txt — RapidBeagle U-Boot environment for fast boot
+# Loaded by U-Boot from the FAT boot partition.
+
+# Suppress U-Boot console spam
+silent=1
+loglevel=0
+
+# Zero boot delay — boot immediately on power-on
+bootdelay=0
+
+# Kernel boot args: quiet kernel, low printk verbosity
+optargs=quiet loglevel=3
+
+# Filesystem types and root device
+mmcdev=0
+mmcpart=2
+mmcroot=/dev/mmcblk0p2 ro
+mmcrootfstype=ext4
+fdtfile=am335x-pocketbeagle.dtb
+console=ttyS0,115200n8
+
+# Boot command: load kernel + DTB, set bootargs, jump
+uenvcmd=load mmc ${mmcdev}:1 ${loadaddr} zImage; load mmc ${mmcdev}:1 ${fdtaddr} ${fdtfile}; setenv bootargs root=${mmcroot} rootfstype=${mmcrootfstype} rootwait ${optargs} console=${console}; bootz ${loadaddr} - ${fdtaddr}
