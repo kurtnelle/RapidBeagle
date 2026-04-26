@@ -1,0 +1,14 @@
+# Build outputs — large binaries, never commit
+dist/
+*.img
+*.img.xz
+
+# Buildroot output (when built locally with shared paths)
+buildroot/output/
+
+# Editor/OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
