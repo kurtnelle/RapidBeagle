@@ -52,6 +52,15 @@ define RTL8812AU_FIX_CFG80211_PUNCT_BITMAP
 endef
 RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_CFG80211_PUNCT_BITMAP
 
+# ── Patch 1b: REGULATORY_IGNORE_STALE_KICKOFF doesn't exist in mainline
+# kernels — appears to have been a downstream-only flag the driver
+# expected. Replace with literal 0 so the OR-assign is a no-op.
+define RTL8812AU_FIX_REGULATORY_IGNORE_STALE_KICKOFF
+	$(SED) 's/REGULATORY_IGNORE_STALE_KICKOFF/0/g' \
+		$(@D)/os_dep/linux/wifi_regd.c
+endef
+RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_REGULATORY_IGNORE_STALE_KICKOFF
+
 # ── Patch 2: Add Edimax EW-7811UTC AC600 (USB ID 7392:a812) to the device
 # table. aircrack-ng v5.13.6 covers other Edimax variants (0xA811, 0xA822,
 # 0xA834) but misses 0xA812 specifically. Same RTL8811AU chipset → handled
