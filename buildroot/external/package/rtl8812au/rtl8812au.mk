@@ -59,5 +59,14 @@ define RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
 endef
 RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
 
+# Add Edimax EW-7811UTC AC600 (USB ID 7392:a812) — RTL8811AU chipset, classifies
+# as RTL8821 in this driver. The morrownr fork's USB ID table covers most
+# Edimax variants (0xA811, 0xA822, 0xA834) but misses 0xA812 specifically.
+# Inject the missing line right after the existing 0xA811 entry.
+define RTL8812AU_ADD_EDIMAX_AC600_ID
+	$(SED) '/0x7392, 0xA811.*Edimax/a\	{USB_DEVICE(0x7392, 0xA812), .driver_info = RTL8821}, /* Edimax EW-7811UTC AC600 */' $(@D)/os_dep/linux/usb_intf.c
+endef
+RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_ADD_EDIMAX_AC600_ID
+
 $(eval $(kernel-module))
 $(eval $(generic-package))
