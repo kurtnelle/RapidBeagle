@@ -81,9 +81,12 @@ else
 
     # Skip the install if /opt/dotnet/dotnet already exists from a previous
     # build's incremental output (Buildroot reuses TARGET_DIR between builds).
+    # NOTE: do NOT try to run the dotnet binary here — it's the ARM target
+    # binary, which cannot execute on the x86_64 build host. With set -euo
+    # pipefail, executing the wrong-arch binary fails the whole script
+    # silently. Just trust the file's existence.
     if [[ -x "$INSTALL_DIR/dotnet" ]]; then
-        DOTNET_VER="$("$INSTALL_DIR/dotnet" --list-runtimes 2>/dev/null | grep '^Microsoft.AspNetCore.App' | head -1 | awk '{print $2}')"
-        echo "post-build: .NET ${DOTNET_VER:-?} already in $INSTALL_DIR — skipping install"
+        echo "post-build: .NET runtime already present at $INSTALL_DIR — skipping install"
     else
         echo "post-build: installing .NET ${DOTNET_CHANNEL} ASP.NET runtime (linux-${DOTNET_ARCH}) ..."
         # The install script downloads to its own cache; we point it at our DL_CACHE
