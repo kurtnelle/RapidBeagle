@@ -68,6 +68,12 @@ start() {
     echo 250       > configs/c.1/MaxPower
 
     mkdir -p functions/ncm.usb0
+    # Pin stable MAC addresses so Windows / Linux see the SAME device on every
+    # boot (otherwise a fresh random MAC each boot makes the host create a new
+    # adapter every time and any static IP config on the host evaporates).
+    # Locally-administered (bit 1 of first octet = 1), unicast (bit 0 = 0).
+    echo "fa:da:da:da:7e:01" > functions/ncm.usb0/dev_addr   # device side  (usb0 on PB)
+    echo "fa:da:da:da:7e:02" > functions/ncm.usb0/host_addr  # host  side  (Windows / Linux)
     ln -sf functions/ncm.usb0 configs/c.1/
 
     # ── Configuration 2: CDC-ECM (legacy Linux / older firmware fallback) ────
@@ -76,6 +82,9 @@ start() {
     echo 250       > configs/c.2/MaxPower
 
     mkdir -p functions/ecm.usb0
+    # Same stable-MAC strategy for ECM
+    echo "fa:da:da:da:7e:11" > functions/ecm.usb0/dev_addr
+    echo "fa:da:da:da:7e:12" > functions/ecm.usb0/host_addr
     ln -sf functions/ecm.usb0 configs/c.2/
 
     # Bind to the first available USB Device Controller
