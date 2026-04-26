@@ -165,7 +165,7 @@ check_guards() {
         exit 1
     fi
 
-    log_ok "Guard checks passed (root=$EUID, arch=$arch)"
+    log_ok "Guard checks passed (root=yes, arch=$arch)"
 }
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
@@ -189,8 +189,8 @@ setup_logging() {
 
 main() {
     parse_args "$@"
-    setup_logging
     check_guards
+    setup_logging
 
     # Handle --restore mode immediately — delegate to restore script
     if [[ "$MODE" == "--restore" ]]; then
