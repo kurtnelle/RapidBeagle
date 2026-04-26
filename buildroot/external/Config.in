@@ -1,0 +1,3 @@
+# RapidBeagle external tree Kconfig hooks.
+# No custom packages in v1 — this file is intentionally empty other than this comment.
+# Future custom packages will add: source "$BR2_EXTERNAL_RAPIDBEAGLE_PATH/package/<name>/Config.in"
