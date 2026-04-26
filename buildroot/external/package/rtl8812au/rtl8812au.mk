@@ -49,5 +49,15 @@ RTL8812AU_MODULE_MAKE_OPTS = \
 	CONFIG_RTL8812AU=m \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
 
+# Fix for an internal symbol rename inconsistency in morrownr's main HEAD:
+# _FW_UNDER_SURVEY was globally renamed to WIFI_UNDER_SURVEY but two call
+# sites in rtw_xmit.c still use the old name, causing the build to fail
+# with "undeclared identifier" against Linux 6.6. Until upstream fixes it
+# we sed it ourselves right after the source is extracted.
+define RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
+	$(SED) 's/_FW_UNDER_SURVEY/WIFI_UNDER_SURVEY/g' $(@D)/core/rtw_xmit.c
+endef
+RTL8812AU_POST_EXTRACT_HOOKS += RTL8812AU_FIX_FW_UNDER_SURVEY_RENAME
+
 $(eval $(kernel-module))
 $(eval $(generic-package))
