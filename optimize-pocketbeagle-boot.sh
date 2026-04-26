@@ -90,6 +90,7 @@ log() {
     msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
     echo "$msg"
     [[ -n "${LOG_FILE:-}" ]] && echo "$msg" >> "$LOG_FILE"
+    return 0  # set -e guard: prevent && short-circuit failure when LOG_FILE is empty
 }
 
 log_action() {
@@ -281,9 +282,16 @@ MANIFEST
             continue
         fi
 
-        # Check it is currently enabled (don't record already-disabled services)
+        # Check it is currently enabled (don't record already-disabled services).
+        #
+        # NOTE on `is-enabled` exit codes: it returns NON-ZERO for "disabled",
+        # "linked", and "masked" (with the state name on stdout). So the previous
+        # `|| echo not-found` pattern caused output like "disabled\nnot-found".
+        # We capture stdout regardless of exit code, then take the first line.
         local state
-        state="$(systemctl is-enabled "${svc}.service" 2>/dev/null || echo "not-found")"
+        state="$(systemctl is-enabled "${svc}.service" 2>/dev/null | head -n1)" || true
+        [[ -z "$state" ]] && state="unknown"
+
         if [[ "$state" != "enabled" && "$state" != "static" ]]; then
             log_skip "Already not enabled (${state}): ${svc}.service"
             continue
@@ -404,6 +412,7 @@ BLACKLIST
 # Detects cmdline file automatically:
 #   1. /boot/firmware/extlinux/extlinux.conf  (BeagleBone Debian >= Buster)
 #   2. /boot/cmdline.txt                      (older images / Raspberry Pi style)
+#   3. /boot/uEnv.txt                         (BeagleBoard.org U-Boot — Trixie+)
 #
 # Backs up original file as .bak before patching.
 # Idempotent: skips if "quiet" is already present in the cmdline.
@@ -411,24 +420,42 @@ BLACKLIST
 patch_kernel_cmdline() {
     log "--- Phase 4: Kernel Cmdline Optimization ---"
 
-    # Detect which cmdline file is present
+    # Detect which cmdline file is present.
+    # Checked in order — the first match wins. uEnv.txt is checked LAST so that
+    # extlinux/cmdline.txt (which fully control args) take priority if present.
     local cmdline_file=""
+    local cmdline_format=""
     if [[ -f "/boot/firmware/extlinux/extlinux.conf" ]]; then
         cmdline_file="/boot/firmware/extlinux/extlinux.conf"
+        cmdline_format="extlinux"
         log_ok "Detected extlinux config: $cmdline_file"
     elif [[ -f "/boot/cmdline.txt" ]]; then
         cmdline_file="/boot/cmdline.txt"
+        cmdline_format="cmdline_txt"
         log_ok "Detected cmdline.txt: $cmdline_file"
+    elif [[ -f "/boot/uEnv.txt" ]]; then
+        cmdline_file="/boot/uEnv.txt"
+        cmdline_format="uenv"
+        log_ok "Detected U-Boot uEnv.txt: $cmdline_file"
     else
         log_warn "No kernel cmdline file found at known paths — skipping Phase 4"
-        log_warn "Checked: /boot/firmware/extlinux/extlinux.conf, /boot/cmdline.txt"
+        log_warn "Checked: /boot/firmware/extlinux/extlinux.conf, /boot/cmdline.txt, /boot/uEnv.txt"
         return
     fi
 
-    # Idempotency: skip if "quiet" is already present
-    if grep -q "quiet" "$cmdline_file"; then
-        log_skip "'quiet' already present in $cmdline_file — skipping"
-        return
+    # Idempotency check — different per format because uEnv.txt has commented
+    # alternate cmdline= lines that contain literal text we'd false-positive on.
+    if [[ "$cmdline_format" == "uenv" ]]; then
+        # Look for "quiet" only on the active (uncommented) cmdline= line
+        if grep -E "^cmdline=" "$cmdline_file" | grep -q "quiet"; then
+            log_skip "'quiet' already present in active cmdline= line — skipping"
+            return
+        fi
+    else
+        if grep -q "quiet" "$cmdline_file"; then
+            log_skip "'quiet' already present in $cmdline_file — skipping"
+            return
+        fi
     fi
 
     log_action "Patch $cmdline_file — append 'quiet loglevel=3' to kernel args"
@@ -443,25 +470,39 @@ patch_kernel_cmdline() {
             log_skip "Backup already exists: $bak_file"
         fi
 
-        # Patch: For extlinux.conf, the kernel args are on the "append" line.
-        # For cmdline.txt, the entire file is one line of kernel args.
-        if [[ "$cmdline_file" == *"extlinux.conf" ]]; then
-            # Append to the "append" directive line (the kernel arguments line)
-            sed -i '/^\s*append\s/s/$/ quiet loglevel=3/' "$cmdline_file"
-            log_ok "Patched extlinux append line"
-        else
-            # cmdline.txt: single line, append args to end
-            sed -i 's/$/ quiet loglevel=3/' "$cmdline_file"
-            log_ok "Patched cmdline.txt"
-        fi
+        # Patch by format:
+        #   extlinux: append to the "append" directive line
+        #   cmdline_txt: single line, append to end
+        #   uenv: append to the active (uncommented) "cmdline=" line only
+        case "$cmdline_format" in
+            extlinux)
+                sed -i '/^\s*append\s/s/$/ quiet loglevel=3/' "$cmdline_file"
+                log_ok "Patched extlinux append line"
+                ;;
+            cmdline_txt)
+                sed -i 's/$/ quiet loglevel=3/' "$cmdline_file"
+                log_ok "Patched cmdline.txt"
+                ;;
+            uenv)
+                # Match only lines starting with "cmdline=" (no leading #)
+                sed -i '/^cmdline=/s/$/ quiet loglevel=3/' "$cmdline_file"
+                log_ok "Patched uEnv.txt cmdline= line"
+                ;;
+        esac
 
         # Record in manifest for restore
         if ! grep -qF "CMDLINE|${cmdline_file}" "$MANIFEST_FILE" 2>/dev/null; then
             echo "CMDLINE|${cmdline_file}" >> "$MANIFEST_FILE"
         fi
 
-        # Verify patch
-        if grep -q "quiet" "$cmdline_file"; then
+        # Verify patch — for uEnv.txt, only the active cmdline= line counts
+        local verified=0
+        if [[ "$cmdline_format" == "uenv" ]]; then
+            grep -E "^cmdline=" "$cmdline_file" | grep -q "quiet" && verified=1
+        else
+            grep -q "quiet" "$cmdline_file" && verified=1
+        fi
+        if [[ "$verified" -eq 1 ]]; then
             log_ok "Verified: 'quiet' present in $cmdline_file"
         else
             log_err "Patch verification failed — 'quiet' not found after edit"
