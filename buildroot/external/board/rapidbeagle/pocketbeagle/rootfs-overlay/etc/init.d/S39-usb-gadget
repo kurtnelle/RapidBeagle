@@ -82,6 +82,15 @@ start() {
     fi
     echo "$UDC" > UDC
     echo "S39-usb-gadget: bound to UDC '$UDC'"
+
+    # Bring the resulting usb0 interface up immediately. The interface only
+    # appears AFTER UDC binding above, so /etc/network/interfaces 'allow-hotplug'
+    # does not fire (the kernel does not emit a hotplug event for configfs-
+    # created interfaces — it just adds them). Trigger ifup explicitly.
+    if [ -e /sys/class/net/usb0 ]; then
+        ifup usb0 >/dev/null 2>&1 || true
+        echo "S39-usb-gadget: usb0 brought up"
+    fi
 }
 
 stop() {
