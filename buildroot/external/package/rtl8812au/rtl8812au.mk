@@ -48,14 +48,17 @@ RTL8812AU_LICENSE_FILES = LICENSE
 RTL8812AU_MODULE_MAKE_OPTS = \
 	CONFIG_RTL8812AU=m \
 	CONFIG_RTL8821A=y \
-	CONFIG_RTL8814A=y \
 	USER_EXTRA_CFLAGS="-DCONFIG_LITTLE_ENDIAN"
 # CONFIG_RTL8821A=y is REQUIRED for the Edimax EW-7811UTC AC600 (chipset
 # RTL8811AU — handled by the RTL8821 codepath). The Makefile defaults this
 # to 'n' which strips all RTL8821 USB device entries from the compiled
 # module's device table, so MODULE_DEVICE_TABLE never sees them and the
 # kernel won't auto-bind the dongle.
-# CONFIG_RTL8814A=y for free coverage of AC1900 quad-band dongles.
+#
+# Do NOT set CONFIG_RTL8814A=y — that codepath references a header
+# (halrf/rtl8814a/halrf_iqk_8814a.h) that is not shipped in morrownr's
+# fork; build fails. If you want AC1900 quad-band support later, switch
+# to a different fork or patch in the missing header.
 
 # Fix for an internal symbol rename inconsistency in morrownr's main HEAD:
 # _FW_UNDER_SURVEY was globally renamed to WIFI_UNDER_SURVEY but two call
