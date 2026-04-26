@@ -5,7 +5,9 @@
 # that have to be modules because they're built outside the kernel tree.
 #
 # Currently:
-#   88XXau — Realtek RTL8811AU/8812AU/8821AU/8814AU USB WiFi (Edimax AC600 etc.)
+#   8812au — Realtek RTL8811AU/8812AU/8821AU/8814AU USB WiFi (Edimax AC600 etc.)
+#            From morrownr/8812au-20210820 fork. Older aircrack-ng fork
+#            named the module 8812au, but morrownr uses 8812au.
 #
 # Loads matter for hardware that's already on the bus at boot — modprobe
 # triggers the driver's probe(), which scans existing devices and creates
@@ -14,7 +16,7 @@
 
 case "$1" in
     start)
-        for mod in 88XXau; do
+        for mod in 8812au; do
             if [ -d "/sys/module/$mod" ]; then
                 echo "S30-load-modules: $mod already loaded"
                 continue
@@ -27,7 +29,7 @@ case "$1" in
         done
         ;;
     stop)
-        for mod in 88XXau; do
+        for mod in 8812au; do
             [ -d "/sys/module/$mod" ] && rmmod "$mod" 2>/dev/null
         done
         ;;
