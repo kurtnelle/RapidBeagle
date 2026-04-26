@@ -18,7 +18,9 @@
 #
 # Pin to a known-good tag from morrownr; bump as needed when newer kernels
 # break things again.
-RTL8812AU_VERSION = v5.15.0.2
+# morrownr's repo has no tags — pin to the current HEAD commit on main.
+# Bump as needed when a kernel API change breaks the build again.
+RTL8812AU_VERSION = 1be3d39079264fbc4763548ce9e9a26a5a9742ab
 RTL8812AU_SITE = $(call github,morrownr,8812au-20210820,$(RTL8812AU_VERSION))
 RTL8812AU_LICENSE = GPL-2.0
 RTL8812AU_LICENSE_FILES = LICENSE
