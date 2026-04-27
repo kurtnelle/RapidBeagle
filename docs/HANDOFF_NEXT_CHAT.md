@@ -234,9 +234,14 @@ ssh-keygen -R 192.168.7.2
 
 ## Open todos when handoff happened
 
-1. **Get WiFi working** (in progress — morrownr/8821au-20210708 with `_FW_UNDER_SURVEY` fix building NOW)
-2. Add overlayfs root for read-only SD operation (designed but not implemented)
-3. Polish cosmetic boot warnings (mount /dev EBUSY message, hostname showing as "(none)" at login)
+1. **Get WiFi working** — morrownr/8821au-20210708 driver compiled cleanly; image (MD5 `fa3311cd...`) is in `dist/` waiting to flash. Step 1 of the new chat is to test it on hardware.
+2. **Read-only rootfs + writable data partition** — IN-FLIGHT. The kernel/defconfig/genimage already partly staged for this:
+   - `linux-fragment.config` now has `CONFIG_OVERLAY_FS=y`
+   - `genimage.cfg` now defines THREE partitions: `boot.vfat` (16 MB), `rootfs.ext4` (256 MB, mounted RO via overlayfs), `data.vfat` (256 MB, FAT32 user-editable from Windows)
+   - `defconfig` rootfs size reduced from `512M` → `256M` (app moves to data partition)
+   - **Still needed:** `post-image.sh` must stage `BINARIES_DIR/data/config.txt` and `BINARIES_DIR/data/README.txt` (genimage references them); init script `S05-overlay-root` to do the overlay mount + bind `/data` to the FAT partition; possibly relocate `/opt/app` symlink to `/data/app` so Windows users can drop binaries directly via the FAT partition.
+3. Polish cosmetic boot warnings (mount /dev EBUSY message, hostname showing as "(none)" at login).
+4. Persistent `/etc/ssh/` host keys across reflash (avoid the host-key warning each rebuild) — natural fit with the writable `data` partition once #2 lands.
 
 Beyond those, eventual nice-to-haves:
 - Persistent `/etc/ssh/` host keys across reflash (avoids the host-key warning each rebuild)
