@@ -1,0 +1,74 @@
+#!/bin/sh
+# overlay-init — kernel `init=` PID 1 wrapper. Sets up overlayfs over the
+# real ext4 rootfs and execs /sbin/init in the new overlay.
+#
+# Why: keeps /dev/mmcblk0p2 (the ext4 rootfs) read-only at runtime so we
+# don't wear the SD card or risk corruption on power loss. Writes to /
+# transparently land in a tmpfs upper layer in RAM.
+#
+# Boot path:
+#   kernel mounts ext4 at / (rw)
+#   kernel execs /sbin/overlay-init (this script) as PID 1
+#   we mount tmpfs, build overlay, switch_root, exec /sbin/init
+#   BusyBox init takes over normally; all S## scripts run unchanged.
+#
+# Failsafe: any error path execs /sbin/init directly so the device still
+# boots in legacy RW mode (visible only via dmesg / serial).
+
+set -e
+
+# Sanity: we must be PID 1 for switch_root to work
+[ "$$" = "1" ] || { echo "overlay-init: not PID 1 (pid=$$)"; exec /sbin/init "$@"; }
+
+LOWER=/
+TMPFS=/mnt
+UPPER=$TMPFS/upper
+WORK=$TMPFS/work
+NEWROOT=$TMPFS/overlay
+SIZE=128m
+
+# Mount /proc + /sys briefly so mount -t can read the kernel's filesystem list.
+# These are early; the real /proc and /sys mounts happen later in /etc/inittab.
+mount -t proc     proc /proc 2>/dev/null || true
+mount -t sysfs    sys  /sys  2>/dev/null || true
+
+# Create tmpfs to hold upper + work layers (RAM-backed)
+mount -t tmpfs -o "size=$SIZE,mode=755" tmpfs $TMPFS || {
+    echo "overlay-init: tmpfs mount failed; booting RW"
+    exec /sbin/init "$@"
+}
+
+mkdir -p $UPPER $WORK $NEWROOT
+
+# Make the existing rootfs read-only (we're already running from it; the
+# kernel allows this — running processes keep their file mappings).
+mount -o remount,ro $LOWER || {
+    echo "overlay-init: remount,ro failed; booting RW"
+    umount $TMPFS 2>/dev/null
+    exec /sbin/init "$@"
+}
+
+# Build the overlay
+mount -t overlay overlay \
+    -o "lowerdir=$LOWER,upperdir=$UPPER,workdir=$WORK" \
+    $NEWROOT || {
+    echo "overlay-init: overlay mount failed; remounting rw and booting"
+    mount -o remount,rw $LOWER 2>/dev/null
+    umount $TMPFS 2>/dev/null
+    exec /sbin/init "$@"
+}
+
+# Make the tmpfs reachable from inside the new root so /mnt/upper /mnt/work
+# stay accessible. Without this, after switch_root, /mnt would be the empty
+# directory from the lower (ext4) layer.
+mount --bind $TMPFS $NEWROOT/mnt || {
+    echo "overlay-init: bind mount failed but overlay is up; pivoting anyway"
+}
+
+# Tear down the temporary /proc /sys before pivot — the real init will
+# re-mount them under the new root.
+umount /proc 2>/dev/null || true
+umount /sys  2>/dev/null || true
+
+# Pivot into the overlay; exec real init.
+exec switch_root $NEWROOT /sbin/init "$@"
