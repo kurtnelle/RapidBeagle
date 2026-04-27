@@ -1,0 +1,2 @@
+# Placeholder so Buildroot copies this directory into the rootfs.
+# At runtime, /data is mounted from /dev/mmcblk0p3 (FAT32) by S10-mount-data.
