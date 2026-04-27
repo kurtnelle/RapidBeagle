@@ -1,0 +1,15 @@
+# RapidBeagle config — edit on PC, insert SD, reboot.
+#
+# Format: KEY=value, one per line. Lines starting with '#' are comments.
+# Whitespace around '=' is tolerated.
+
+# ── WiFi ──
+# Read by the .NET app via wpa_supplicant control socket. Not used by init.
+wifi_ssid=
+wifi_password=
+
+# ── App binary (optional) ──
+# If set and /data/<app_binary> is executable, S99-app-launcher runs it
+# instead of the built-in /opt/app/rapidbeagle-app. Use this to deploy new
+# app versions by copying a single binary onto this partition.
+# app_binary=rapidbeagle-app
