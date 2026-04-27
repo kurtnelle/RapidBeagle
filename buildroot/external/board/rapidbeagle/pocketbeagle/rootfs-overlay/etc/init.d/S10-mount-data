@@ -1,0 +1,49 @@
+#!/bin/sh
+# S10-mount-data — mount the user-editable FAT32 data partition at /data
+#
+# /data holds:
+#   - config.txt        (key=value config, read by init scripts and the app)
+#   - rapidbeagle-app   (optional: app binary; overrides /opt/app/rapidbeagle-app)
+#   - any other files the user drops on the FAT32 partition from a PC
+#
+# Mounted READ-ONLY on the device — the user only writes from a PC with the
+# SD inserted. If the partition is missing or corrupt, S99-app-launcher and
+# the .NET app must continue to function with their bundled defaults.
+
+DATA_DEV=/dev/mmcblk0p3
+DATA_DIR=/data
+
+start() {
+    mkdir -p "$DATA_DIR"
+
+    if [ ! -b "$DATA_DEV" ]; then
+        echo "S10-mount-data: $DATA_DEV not present — skipping"
+        return 0
+    fi
+
+    if mountpoint -q "$DATA_DIR" 2>/dev/null; then
+        echo "S10-mount-data: $DATA_DIR already mounted — skipping"
+        return 0
+    fi
+
+    if mount -t vfat -o ro,noatime "$DATA_DEV" "$DATA_DIR"; then
+        echo "S10-mount-data: $DATA_DIR mounted (ro)"
+    else
+        echo "S10-mount-data: mount $DATA_DEV failed — continuing without /data"
+    fi
+}
+
+stop() {
+    if mountpoint -q "$DATA_DIR" 2>/dev/null; then
+        umount "$DATA_DIR" || true
+    fi
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+
+exit 0
