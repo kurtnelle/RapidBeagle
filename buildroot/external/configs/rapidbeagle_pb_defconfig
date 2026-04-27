@@ -50,7 +50,7 @@ BR2_INIT_BUSYBOX=y
 # SD is comfortable.
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
-BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
+BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
 BR2_TARGET_ROOTFS_TAR=y
 
 # ── /dev management: devtmpfs (mounted by kernel, BusyBox manages it) ───────
