@@ -11,6 +11,7 @@
 # Env:
 #   BUILDROOT_DIR              path to Buildroot clone (default: $HOME/buildroot)
 #   RAPIDBEAGLE_SSH_PUBKEY     path to SSH pubkey for image (default: $HOME/.ssh/id_ed25519.pub)
+#   RAPIDBEAGLE_DIST_DIR       Windows dist dir via WSL2 mount (default: /mnt/i/Source/repos/RapidBeagle/dist)
 #   J                          parallel jobs (default: $(nproc))
 
 set -euo pipefail
@@ -20,6 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILDROOT_EXT_DIR="$(dirname "$SCRIPT_DIR")/external"
 BUILDROOT_DIR="${BUILDROOT_DIR:-$HOME/buildroot}"
 DEFCONFIG="rapidbeagle_pb_defconfig"
+RAPIDBEAGLE_DIST_DIR="${RAPIDBEAGLE_DIST_DIR:-/mnt/i/Source/repos/RapidBeagle/dist}"
 J="${J:-$(nproc 2>/dev/null || echo 2)}"
 
 # ── Sanity checks ────────────────────────────────────────────────────────────
@@ -70,6 +72,10 @@ case "${1:-build}" in
         echo "  Image: $BUILDROOT_DIR/output/images/sdcard.img"
         echo "  Flash: sudo $SCRIPT_DIR/flash-sdcard.sh /dev/sdX"
         echo "================================================================"
+        echo "build.sh: copying image → $RAPIDBEAGLE_DIST_DIR/sdcard.img"
+        mkdir -p "$RAPIDBEAGLE_DIST_DIR"
+        cp "$BUILDROOT_DIR/output/images/sdcard.img" "$RAPIDBEAGLE_DIST_DIR/sdcard.img"
+        echo "build.sh: copy done ($(du -h "$RAPIDBEAGLE_DIST_DIR/sdcard.img" | cut -f1))"
         ;;
     *)
         echo "Usage: $0 [defconfig|menuconfig|build|clean|distclean]" >&2
